@@ -79,6 +79,7 @@ export default function Home() {
     })
     .sort((a, b) => b.count - a.count);
 
+  const maxFinos = contagemPorPessoa[0]?.count || 0;
   const reiDoFino = contagemPorPessoa[0];
   const media = perfis.length > 0 ? (totalFinos / perfis.length).toFixed(1) : 0;
 
@@ -156,7 +157,7 @@ export default function Home() {
         </div>
         <div className="bg-white p-3 rounded-xl shadow text-center">
           <p className="text-xs text-slate-500 uppercase font-bold">
-            Bebedo 🍾
+            Bêbedo 🍾
           </p>
           <p className="text-lg font-bold text-slate-800 truncate">
             {reiDoFino && reiDoFino.count > 0 ? reiDoFino.nome : '-'}
@@ -171,8 +172,13 @@ export default function Home() {
         <div className="space-y-3">
           {contagemPorPessoa.map((p, idx) => {
             let badge = '';
-            if (Number(p.count) < Number(media) * 0.5) badge = '🕺 conas';
-            else if (idx === 0 && p.count > 0) badge = '🍾 Bêbedo';
+            if (p.count > 0 && p.count === maxFinos) {
+              badge = '🍾 Bêbedo';
+            } else if (Number(p.count) < Number(media) * 0.5) {
+              badge = '🕺 conas';
+            } else {
+              badge = '🍺 A acompanhar';
+            }
 
             return (
               <div
