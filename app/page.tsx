@@ -9,11 +9,10 @@ const MENSAGENS_DIVERTIDAS = [
   'Mais próximo da cirrose! 🚑',
   'Tinhas comprado 10 pães com este fino! 🥖',
   'Lá se vai a dieta... 🥗📉',
-  'O teu fígado mandou pedir tréguas! 🏳️',
-  'Mais um para a conta da vergonha! 🙈',
-  'A pátria agradece o teu esforço! 🇵🇹🍻',
-  'Amanhã a ressaca paga-se a dobrar! 🧟‍♂️',
-  'Patrocínio oficial do teu fígado! 💛',
+  'O teu fígado mandou-te para o caralho! 🏳️',
+  'O grupo agradece o teu esforço! 🇵🇹🍻',
+  'Amanhã vai doer🧟‍♂️',
+  'O rim está aqui é para trabalhar. Por isso tenho 2 💛',
 ];
 
 export default function Home() {
@@ -164,6 +163,7 @@ export default function Home() {
       }
     }
     // Níveis
+    if (userFinos.length >= 1) list.push('🌱 Primeiro Fino');
     if (userFinos.length >= 10) list.push('🥉 10 Finos');
     if (userFinos.length >= 25) list.push('🥈 25 Finos');
     if (userFinos.length >= 50) list.push('🥇 50 Finos');
