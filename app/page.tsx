@@ -171,22 +171,96 @@ export default function Home() {
     return list;
   }
 
-  // AGRUPAMENTO DE FINOS POR DIA
-  const finosPorDia = finos.reduce((acc: { [key: string]: any[] }, fino) => {
-    const dataStr = new Date(fino.data_hora).toLocaleDateString('pt-PT', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
+  // --- LÓGICA DE RECORDES DO GRUPO ---
+  
+  // 1. O DIA MAIS ÉPICO (Dia com mais finos no geral)
+  let maxFinosDay = { dataPt: '-', total: 0, topUsers: [] as string[], topCount: 0 };
+  
+  // Agrupar todos os finos do histórico por Data
+  const finosPorDataStr: { [key: string]: any[] } = {};
+  finos.forEach(f => {
+    const dStr = new Date(f.data_hora).toLocaleDateString('pt-PT');
+    if (!finosPorDataStr[dStr]) finosPorDataStr[dStr] = [];
+    finosPorDataStr[dStr].push(f);
+  });
+
+  for (const [dataPt, lista] of Object.entries(finosPorDataStr)) {
+    if (lista.length > maxFinosDay.total) {
+      // Quem foi o MVP deste dia?
+      const contagemDia: { [key: string]: number } = {};
+      lista.forEach(f => {
+        const nome = f.perfis?.nome || 'Desconhecido';
+        contagemDia[nome] = (contagemDia[nome] || 0) + 1;
+      });
+      let dayMax = 0;
+      let topNames: string[] = [];
+      for (const [n, c] of Object.entries(contagemDia)) {
+        if (c > dayMax) { dayMax = c; topNames = [n]; }
+        else if (c === dayMax) { topNames.push(n); }
+      }
+      maxFinosDay = { dataPt, total: lista.length, topUsers: topNames, topCount: dayMax };
+    }
+  }
+
+  // 2. STREAKS (Maior Streak e Streak Em Vigor)
+  const hojeMs = new Date().setHours(0, 0, 0, 0);
+  const ontemMs = hojeMs - 86400000; // 86400000 ms = 1 dia
+
+  const statsStreaks = perfis.map(p => {
+    const userFinos = finos.filter(f => f.perfil_id === p.id);
+    
+    // Obter apenas os dias únicos (à meia noite) em que o utilizador bebeu, ordenados.
+    const diasUnicosMs = [...new Set(userFinos.map(f => new Date(f.data_hora).setHours(0, 0, 0, 0)))].sort((a, b) => a - b);
+
+    let maxS = 0;
+    let curS = 0;
+    let tempS = 0;
+    let lastMs: number | null = null;
+
+    diasUnicosMs.forEach(diaMs => {
+      if (lastMs === null) {
+        tempS = 1;
+      } else {
+        const diffDays = Math.round((diaMs - lastMs) / 86400000);
+        if (diffDays === 1) {
+          tempS++; // Bebeu no dia seguinte, streak continua
+        } else if (diffDays > 1) {
+          tempS = 1; // Falhou um dia, streak reinicia
+        }
+      }
+      if (tempS > maxS) maxS = tempS;
+      lastMs = diaMs;
     });
+
+    // Validar se o Streak está em Vigor (ou seja, se a última vez que bebeu foi Hoje ou Ontem)
+    if (diasUnicosMs.length > 0) {
+      const lastDayMs = diasUnicosMs[diasUnicosMs.length - 1];
+      if (lastDayMs === hojeMs || lastDayMs === ontemMs) {
+        curS = tempS;
+      } else {
+        curS = 0;
+      }
+    }
+
+    return { id: p.id, nome: p.nome, maxStreak: maxS, currentStreak: curS };
+  });
+
+  const overallMaxStreakVal = Math.max(...statsStreaks.map(s => s.maxStreak), 0);
+  const overallCurrentStreakVal = Math.max(...statsStreaks.map(s => s.currentStreak), 0);
+
+  const topMaxStreakUsers = statsStreaks.filter(s => s.maxStreak === overallMaxStreakVal && overallMaxStreakVal > 1).map(s => s.nome);
+  const topCurrentStreakUsers = statsStreaks.filter(s => s.currentStreak === overallCurrentStreakVal && overallCurrentStreakVal > 1).map(s => s.nome);
+
+  // AGRUPAMENTO PARA HISTÓRICO DE DIAS
+  const toggleDia = (dia: string) => {
+    setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
+  };
+  const finosPorDiaParaLista = finos.reduce((acc: { [key: string]: any[] }, fino) => {
+    const dataStr = new Date(fino.data_hora).toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     if (!acc[dataStr]) acc[dataStr] = [];
     acc[dataStr].push(fino);
     return acc;
   }, {});
-
-  const toggleDia = (dia: string) => {
-    setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
-  };
 
   return (
     <main className="min-h-screen bg-amber-50 text-slate-900 p-4 max-w-md mx-auto font-sans pb-12 relative">
@@ -277,6 +351,58 @@ export default function Home() {
         </div>
       </div>
 
+      {/* RECORDES DO GRUPO (STREAKS E DIA ÉPICO) */}
+      {maxFinosDay.total > 0 && (
+        <div className="bg-white p-4 rounded-xl shadow mb-6">
+          <h2 className="font-bold text-lg mb-3 text-slate-800 border-b pb-1">
+            🏆 Recordes
+          </h2>
+          <div className="space-y-3">
+            
+            {/* Streak em Vigor */}
+            {overallCurrentStreakVal > 1 && (
+              <div className="flex items-center text-sm bg-amber-50 p-3 rounded-lg border border-amber-200">
+                <div className="text-3xl mr-3">🔥</div>
+                <div>
+                  <p className="font-black text-amber-900">Streak Atual</p>
+                  <p className="text-xs text-amber-800 leading-tight">
+                    <strong className="text-amber-600">{topCurrentStreakUsers.join(', ')}</strong> {topCurrentStreakUsers.length > 1 ? 'estão' : 'está'} a beber há <span className="font-bold">{overallCurrentStreakVal} dias</span> seguidos!
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Maior Streak All Time */}
+            {overallMaxStreakVal > 1 && (
+              <div className="flex items-center text-sm bg-slate-50 p-3 rounded-lg border">
+                <div className="text-3xl mr-3">👑</div>
+                <div>
+                  <p className="font-bold text-slate-800">Maior Streak</p>
+                  <p className="text-xs text-slate-500 leading-tight">
+                    O recorde de <span className="font-bold text-amber-600">{overallMaxStreakVal} dias</span> seguidos a beber é mantido por <strong className="text-slate-700">{topMaxStreakUsers.join(', ')}</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Dia Mais Épico - Reformulado */}
+            <div className="flex items-center text-sm bg-slate-50 p-3 rounded-lg border">
+              <div className="text-3xl mr-3">📅</div>
+              <div>
+                <p className="font-bold text-slate-800">O dia {maxFinosDay.dataPt} foi uma putaria</p>
+                <p className="text-xs text-slate-500 leading-tight mt-1">
+                  Beberam-se <span className="font-bold text-amber-600">{maxFinosDay.total} finos</span> no total.<br/>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 mt-1 block">
+                    Culpados do dia: {maxFinosDay.topUsers.join(', ')} ({maxFinosDay.topCount} finos)
+                  </span>
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* SECTOR DE RANKING */}
       <div className="bg-white p-4 rounded-xl shadow mb-6">
         <div className="flex justify-between items-center mb-3 border-b pb-2">
@@ -322,6 +448,10 @@ export default function Home() {
               statusBadge = '🍺 A acompanhar';
             }
 
+            // Descobrir a Streak atual do utilizador para mostrar no Badge
+            const streakData = statsStreaks.find(s => s.id === p.id);
+            const userCurrentStreak = streakData?.currentStreak || 0;
+
             return (
               <div key={p.id} className="border-b pb-2 last:border-0">
                 <div className="flex justify-between items-center text-sm">
@@ -344,9 +474,17 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* BADGES CUMULATIVOS */}
-                {p.conquistas.length > 0 && (
+                {/* BADGES CUMULATIVOS + STREAK INDIVIDUAL */}
+                {(p.conquistas.length > 0 || userCurrentStreak > 1) && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
+                    
+                    {/* Badge Individual de Streak Atual (só aparece se estiver > 1 dia) */}
+                    {userCurrentStreak > 1 && (
+                      <span className="bg-orange-100 text-orange-800 border border-orange-200 text-[10px] px-1.5 py-0.5 rounded-md font-medium">
+                        🔥 {userCurrentStreak} Dias Seguidos
+                      </span>
+                    )}
+
                     {p.conquistas.map((badgeText: string, i: number) => (
                       <span
                         key={i}
@@ -369,13 +507,13 @@ export default function Home() {
           📅 Histórico & Fotos por Dia
         </h2>
 
-        {Object.keys(finosPorDia).length === 0 ? (
+        {Object.keys(finosPorDiaParaLista).length === 0 ? (
           <p className="text-xs text-slate-400 text-center py-4">
             Ainda não há finos registados.
           </p>
         ) : (
           <div className="space-y-3">
-            {Object.entries(finosPorDia).map(([dia, listaFinos]) => {
+            {Object.entries(finosPorDiaParaLista).map(([dia, listaFinos]) => {
               const estaAberto = !!diasAbertos[dia];
               return (
                 <div key={dia} className="border rounded-xl overflow-hidden bg-slate-50">
