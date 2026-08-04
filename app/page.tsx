@@ -156,7 +156,7 @@ export default function Home() {
         </div>
         <div className="bg-white p-3 rounded-xl shadow text-center">
           <p className="text-xs text-slate-500 uppercase font-bold">
-            Rei do Fino 👑
+            Bebedo 🍾
           </p>
           <p className="text-lg font-bold text-slate-800 truncate">
             {reiDoFino && reiDoFino.count > 0 ? reiDoFino.nome : '-'}
@@ -171,8 +171,8 @@ export default function Home() {
         <div className="space-y-3">
           {contagemPorPessoa.map((p, idx) => {
             let badge = '';
-            if (Number(p.count) < Number(media) * 0.5) badge = '🌽 Cone';
-            else if (idx === 0 && p.count > 0) badge = '👑 Líder';
+            if (Number(p.count) < Number(media) * 0.5) badge = '🕺 conas';
+            else if (idx === 0 && p.count > 0) badge = '🍾 Bêbedo';
 
             return (
               <div
@@ -181,7 +181,7 @@ export default function Home() {
               >
                 <span className="font-semibold text-slate-700">
                   {idx + 1}. {p.nome}{' '}
-                  <span className="text-xs text-slate-400">{badge}</span>
+                  <span className="text-xs text-slate-400 font-normal">{badge}</span>
                 </span>
                 <span className="font-black bg-amber-100 text-amber-900 px-2 py-1 rounded-full">
                   {p.count} finos
@@ -194,7 +194,7 @@ export default function Home() {
 
       <div className="bg-white p-4 rounded-xl shadow">
         <h2 className="font-bold text-lg mb-3 text-slate-800 border-b pb-1">
-          📸 Útimos Finos
+          📸 Últimos Finos
         </h2>
         <div className="space-y-4">
           {finos.slice(0, 5).map((f) => (
