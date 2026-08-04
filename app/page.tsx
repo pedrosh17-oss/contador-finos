@@ -15,6 +15,14 @@ const MENSAGENS_DIVERTIDAS = [
   'O rim está aqui é para trabalhar. Por isso tenho 2 💛',
 ];
 
+// LISTA DE SONS VARIADOS (Efeitos Sonoros Livres)
+const SONS_CELEBRACAO = [
+  'https://assets.mixkit.co/active_storage/sfx/2070/2070-preview.mp3', // Pop de Garrafa / Carica
+  'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3', // Brinde de copos
+  'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3', // Buzina / Festejo
+  'https://assets.mixkit.co/active_storage/sfx/131.mp3',               // Arroto / Efeito Cómico
+];
+
 export default function Home() {
   const [perfis, setPerfis] = useState<any[]>([]);
   const [finos, setFinos] = useState<any[]>([]);
@@ -50,12 +58,53 @@ export default function Home() {
     }
   }
 
-  function dispararConfeti() {
+  // TOCA SOM ALEATÓRIO E DISPARA VIBRAÇÃO NO TELEMÓVEL
+  function tocarSomEVibrar() {
+    if (typeof window !== 'undefined') {
+      // 1. Vibração do telemóvel (se o browser permitir)
+      if ('vibrate' in navigator) {
+        navigator.vibrate([100, 50, 100]);
+      }
+
+      // 2. Escolher e tocar um som aleatório da lista
+      const somUrl = SONS_CELEBRACAO[Math.floor(Math.random() * SONS_CELEBRACAO.length)];
+      const audio = new Audio(somUrl);
+      audio.volume = 0.8;
+      audio.play().catch((err) => console.log('Áudio bloqueado pelo browser:', err));
+    }
+  }
+
+  // ANIMAÇÃO DE CELEBRAÇÃO COM CANECAS E FOGO DE ARTIFÍCIO
+  function dispararCelebracao() {
+    tocarSomEVibrar();
+
     if (typeof window !== 'undefined') {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js';
       script.onload = () => {
-        (window as any).confetti?.({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+        const confetti = (window as any).confetti;
+        if (!confetti) return;
+
+        // Disparo duplo de confetis dourados estilo fogo de artifício
+        confetti({
+          particleCount: 80,
+          spread: 100,
+          origin: { y: 0.6 },
+          colors: ['#f59e0b', '#d97706', '#b45309', '#ffffff']
+        });
+
+        // Efeito de emojis a voar (Cervejas e Garrafas)
+        const scalar = 2;
+        const beerEmoji = confetti.shapeFromText({ text: '🍺', scalar });
+        const bottleEmoji = confetti.shapeFromText({ text: '🍾', scalar });
+
+        confetti({
+          shapes: [beerEmoji, bottleEmoji],
+          particleCount: 15,
+          scalar,
+          spread: 70,
+          origin: { y: 0.7 }
+        });
       };
       document.body.appendChild(script);
     }
@@ -97,8 +146,8 @@ export default function Home() {
         .from('finos')
         .insert([{ perfil_id: selectedUser, foto_url: photoUrl }]);
 
-      // Celebração e Frase Aleatória
-      dispararConfeti();
+      // Celebração, Som, Vibração e Frase Aleatória
+      dispararCelebracao();
       const frase = MENSAGENS_DIVERTIDAS[Math.floor(Math.random() * MENSAGENS_DIVERTIDAS.length)];
       setMensagemModal(frase);
 
@@ -172,8 +221,6 @@ export default function Home() {
   const media = perfis.length > 0 ? (totalFinos / perfis.length).toFixed(1) : '0';
 
   // --- LÓGICA DE RECORDES DO GRUPO ---
-  
-  // 1. O DIA MAIS ÉPICO / PUTARIA
   let maxFinosDay = { dataPt: '-', total: 0, topUsers: [] as string[], topCount: 0 };
   
   const finosPorDataStr: { [key: string]: any[] } = {};
@@ -200,7 +247,7 @@ export default function Home() {
     }
   }
 
-  // 2. STREAKS
+  // STREAKS
   const hojeMs = new Date().setHours(0, 0, 0, 0);
   const ontemMs = hojeMs - 86400000;
 
@@ -346,7 +393,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* RECORDES DO GRUPO (STREAKS E DIA ÉPICO) */}
+      {/* RECORDES DO GRUPO */}
       {maxFinosDay.total > 0 && (
         <div className="bg-white p-4 rounded-xl shadow mb-6">
           <h2 className="font-bold text-lg mb-3 text-slate-800 border-b pb-1">
@@ -380,7 +427,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Dia Mais Épico - Reformulado */}
+            {/* Dia Mais Épico */}
             <div className="flex items-center text-sm bg-slate-50 p-3 rounded-lg border">
               <div className="text-3xl mr-3">📅</div>
               <div>
@@ -403,7 +450,6 @@ export default function Home() {
         <div className="flex justify-between items-center mb-3 border-b pb-2">
           <h2 className="font-bold text-lg text-slate-800">📊 Ranking</h2>
           
-          {/* TOGGLE SEMANAL / GERAL */}
           <div className="flex bg-slate-100 p-1 rounded-lg text-xs font-bold">
             <button
               onClick={() => setAbaRanking('semanal')}
@@ -509,7 +555,6 @@ export default function Home() {
               const estaAberto = !!diasAbertos[dia];
               return (
                 <div key={dia} className="border rounded-xl overflow-hidden bg-slate-50">
-                  {/* CABEÇALHO DO DIA (CLICÁVEL) */}
                   <button
                     onClick={() => toggleDia(dia)}
                     className="w-full p-3 flex justify-between items-center text-left bg-slate-100 hover:bg-slate-200 transition"
@@ -522,7 +567,6 @@ export default function Home() {
                     </span>
                   </button>
 
-                  {/* LISTA EXPANSÍVEL */}
                   {estaAberto && (
                     <div className="p-3 space-y-3 bg-white">
                       {listaFinos.map((f) => (
@@ -539,7 +583,6 @@ export default function Home() {
                             </span>
                           </div>
 
-                          {/* FOTO COM CLIQUE PARA EXPANDIR */}
                           {f.foto_url && (
                             <img
                               src={f.foto_url}
@@ -559,20 +602,20 @@ export default function Home() {
         )}
       </div>
 
-      {/* MODAL DE FRASES DIVERTIDAS / MENSAGEM */}
+      {/* MODAL DE MENSAGEM DIVERTIDA SEM ASPAS */}
       {mensagemModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 text-center max-w-xs shadow-2xl transform transition-all scale-100">
-            <div className="text-4xl mb-2">🎉</div>
+            <div className="text-4xl mb-2">🍻</div>
             <h3 className="font-black text-amber-900 text-lg mb-2">Fino Registado!</h3>
             <p className="text-sm font-semibold text-slate-700 mb-6">
-              "{mensagemModal}"
+              {mensagemModal}
             </p>
             <button
               onClick={() => setMensagemModal(null)}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 rounded-xl shadow"
+              className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 rounded-xl shadow transition transform active:scale-95"
             >
-              Bora para o próximo! 🍻
+              Siga fiii! 🍻
             </button>
           </div>
         </div>
