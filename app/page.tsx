@@ -23,6 +23,59 @@ const SONS_CELEBRACAO = [
   'https://assets.mixkit.co/active_storage/sfx/131.mp3',               // Arroto
 ];
 
+// ⚡ HELPER PARA COMPRIMIR E REDIMENSIONAR FOTOS NO NAVEGADOR (3 MB -> ~80 KB)
+async function comprimirImagem(file: File, maxDimensao = 600, qualidade = 0.8): Promise<File> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Redimensiona proporcionalmente
+        if (width > height) {
+          if (width > maxDimensao) {
+            height = Math.round((height * maxDimensao) / width);
+            width = maxDimensao;
+          }
+        } else {
+          if (height > maxDimensao) {
+            width = Math.round((width * maxDimensao) / height);
+            height = maxDimensao;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        // Converte para WebP super leve
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              const fotoComprimida = new File(
+                [blob], 
+                file.name.replace(/\.[^/.]+$/, "") + ".webp", 
+                { type: 'image/webp', lastModified: Date.now() }
+              );
+              resolve(fotoComprimida);
+            } else {
+              resolve(file); // Fallback se a conversão falhar
+            }
+          },
+          'image/webp',
+          qualidade
+        );
+      };
+    };
+  });
+}
+
 export default function Home() {
   const [perfis, setPerfis] = useState<any[]>([]);
   const [finos, setFinos] = useState<any[]>([]);
@@ -102,13 +155,18 @@ export default function Home() {
       setLoading(true);
       const file = e.target.files?.[0];
       let photoUrl = null;
+
       if (file) {
-        const fileName = `${Date.now()}-${file.name}`;
-        const { error: uploadError } = await supabase.storage.from('fotos-finos').upload(fileName, file);
+        // ⚡ COMPRIME A IMAGEM ANTES DO UPLOAD
+        const fotoComprimida = await comprimirImagem(file);
+
+        const fileName = `${Date.now()}-${fotoComprimida.name}`;
+        const { error: uploadError } = await supabase.storage.from('fotos-finos').upload(fileName, fotoComprimida);
         if (uploadError) throw uploadError;
         const { data } = supabase.storage.from('fotos-finos').getPublicUrl(fileName);
         photoUrl = data.publicUrl;
       }
+
       await supabase.from('finos').insert([{ perfil_id: selectedUser, foto_url: photoUrl }]);
       
       dispararCelebracao();
@@ -326,13 +384,13 @@ export default function Home() {
       {/* BOTÃO PRINCIPAL +1 FINO */}
       <div className="text-center mb-6">
         <label className={`inline-block w-full py-6 rounded-2xl font-black text-2xl text-white shadow-xl cursor-pointer transition transform active:scale-95 ${selectedUser ? 'bg-amber-500 hover:bg-amber-600' : 'bg-slate-400 cursor-not-allowed'}`}>
-          {loading ? 'A guardar... 🍺' : '🍺 +1 FINO'}
+          {loading ? 'A comprimir & guardar... 🍺' : '🍺 +1 FINO'}
           <input type="file" accept="image/*" capture="environment" className="hidden" disabled={!selectedUser || loading} onChange={registarFino} />
         </label>
         {!selectedUser && <p className="text-xs text-red-500 mt-2 font-semibold">Seleciona o teu nome acima para poder registar.</p>}
       </div>
 
-      {/* PAINEL DE CONTAS & TOTAIS (PREÇO FIXO RESTAURADO) */}
+      {/* PAINEL DE CONTAS & TOTAIS */}
       <div className="grid grid-cols-2 gap-3 mb-6">
         <div className="bg-white p-3 rounded-xl shadow text-center flex flex-col justify-center">
           <p className="text-[10px] text-slate-500 uppercase font-bold">Total do Grupo</p>
@@ -491,7 +549,7 @@ export default function Home() {
                 <span className={`w-1/3 text-right font-bold text-sm ${f2Stats.streak > f1Stats.streak ? 'text-amber-500' : 'text-slate-400'}`}>{f2Stats.streak} dias</span>
               </div>
 
-              {/* Ritmo (O MENOR É O VENCEDOR) */}
+              {/* Ritmo */}
               <div className="flex justify-between items-center">
                 <span className={`w-1/3 text-left font-bold text-sm ${f1Stats.ritmo < f2Stats.ritmo ? 'text-blue-500' : 'text-slate-400'}`}>
                   {f1Stats.ritmo === Infinity ? '-' : `${f1Stats.ritmo} min`}
