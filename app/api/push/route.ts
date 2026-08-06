@@ -8,7 +8,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// Chaves VAPID oficiais do projeto (com fallbacks corretos)
 const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFLDnG2tikGutjEDfa5xyg4bGaJZ2wftHDiRvY-bPzttKqhjWwsH9VN2MkVfpHDqwEt7i8AZnZqdnUDQPGZBR08';
 const privateKey = process.env.VAPID_PRIVATE_KEY || 'Ffn43KYGfSv1SQ0GPTlA4yAcTJ9TzscX26CrKeSCwkw';
 
@@ -22,30 +21,40 @@ export async function POST(req: Request) {
   try {
     const { title, body } = await req.json();
 
-    // Buscar todas as subscrições registadas
-    const { data: subs } = await supabase.from('push_subscriptions').select('*');
+    const { data: subs, error: fetchError } = await supabase.from('push_subscriptions').select('*');
 
-    if (!subs || subs.length === 0) {
-      return NextResponse.json({ success: true, count: 0 });
+    if (fetchError) {
+      console.error('Erro ao ler subscrições do Supabase:', fetchError);
+      return NextResponse.json({ error: fetchError.message }, { status: 500 });
     }
 
-    // Enviar notificação para todos os telemóveis registados
+    if (!subs || subs.length === 0) {
+      console.log('Aviso: Nenhuma subscrição encontrada na tabela push_subscriptions.');
+      return NextResponse.json({ success: true, count: 0, message: 'Sem subscrições' });
+    }
+
     const envios = subs.map(async (item) => {
       try {
+        console.log(`A enviar push para o ID: ${item.id}`);
         await webpush.sendNotification(
           item.subscription,
           JSON.stringify({ title, body })
         );
-      } catch (err) {
-        // Se a subscrição expirou ou falhou, remove da BD
-        await supabase.from('push_subscriptions').delete().eq('id', item.id);
+        console.log(`✅ Push enviado com sucesso para o ID: ${item.id}`);
+      } catch (err: any) {
+        console.error(`❌ ERRO AO ENVIAR PUSH PARA O ID ${item.id}:`);
+        console.error('Mensagem:', err?.message);
+        console.error('StatusCode:', err?.statusCode);
+        console.error('Body:', err?.body);
+        
+        // Deixamos de apagar automaticamente para podermos analisar o erro na BD
       }
     });
 
     await Promise.all(envios);
     return NextResponse.json({ success: true, count: subs.length });
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: 'Erro ao enviar push' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Erro geral na API push:', error);
+    return NextResponse.json({ error: error.message || 'Erro ao enviar push' }, { status: 500 });
   }
 }
