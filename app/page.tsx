@@ -177,8 +177,6 @@ export default function Home() {
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [novoNome, setNovoNome] = useState('');
   const [loading, setLoading] = useState(false);
-  
-  const [pushStatus, setPushStatus] = useState<'default' | 'granted' | 'denied'>('default');
 
   // MODO DE REGISTO EM INÍCIO: INDIVIDUAL OU RODADA
   const [modoRegisto, setModoRegisto] = useState<'individual' | 'rodada'>('individual');
@@ -207,10 +205,6 @@ export default function Home() {
 
     const themeGuardado = localStorage.getItem('finos_theme');
     if (themeGuardado === 'dark') setDarkMode(true);
-    
-    if (typeof Notification !== 'undefined') {
-      setPushStatus(Notification.permission as any);
-    }
 
     // ⚡ CANAL EM TEMPO REAL (SUPABASE REALTIME)
     const canalRealtime = supabase
@@ -243,7 +237,6 @@ export default function Home() {
     }
     const sucesso = await ativarNotificacoesPush(selectedUser);
     if (sucesso) {
-      setPushStatus('granted');
       mostrarToast('Notificações ativadas com sucesso! 🔔', 'sucesso');
     }
   };
@@ -281,12 +274,10 @@ export default function Home() {
       }
       
       // 🚨 VERIFICAR INATIVIDADE (CONAS DE SABÃO)
-      const umaSemanaAtrasMs = Date.now() - 7 * 86400000;
       dataPerfis?.forEach(p => {
         const pFinos = dataFinos.filter(f => f.perfil_id === p.id && f.tipo_bebida !== 'gregorio');
         if (pFinos.length > 0) {
           const ultimoFinoMs = new Date(pFinos[0].data_hora).getTime();
-          // Se o último fino foi há exatamente 7 dias (com margem de 1 min), dispara notificação
           if (Date.now() - ultimoFinoMs >= 7 * 86400000 && Date.now() - ultimoFinoMs <= 7 * 86400000 + 60000) {
             enviarNotificacao('🧼 ALERTA CONAS DE SABÃO!', `${p.nome} está há 1 semana sem beber.`);
           }
@@ -787,14 +778,13 @@ export default function Home() {
             {isModoFesta ? 'É SEMPRE A VIRÁ-LOS' : '🍻 Contador'}
           </h1>
           <div className="flex gap-2">
-            {pushStatus === 'default' && (
-              <button
-                onClick={handleAtivarNotificacoes}
-                className={`px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm bg-blue-500 text-white border-blue-600 animate-pulse`}
-              >
-                🔔 Ativar Alertas
-              </button>
-            )}
+            <button
+              onClick={handleAtivarNotificacoes}
+              className="px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm bg-blue-600 hover:bg-blue-500 text-white border-blue-500 active:scale-95"
+              title="Ativar ou atualizar subscrição de Notificações"
+            >
+              🔔 Alertas
+            </button>
             <button
               onClick={toggleDarkMode}
               className={`px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm ${
