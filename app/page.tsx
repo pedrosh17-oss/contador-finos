@@ -6,11 +6,11 @@ import { supabase } from '../lib/supabase';
 // ==========================================
 // ⚙️ CONFIGURAÇÃO RÁPIDA
 // ==========================================
-const TOTAL_GIFS = 10;                     // 👈 Número total de stickers em public/gifs/
-const META_FESTA_DIARIA = 30;              // 🎯 Aos 30 finos diários arranca o caos!
+const TOTAL_GIFS = 1;                     // 👈 Número total de stickers em public/gifs/
+const META_FESTA_DIARIA = 20;              // 🎯 Aos 30 finos diários arranca o caos!
 const DATA_INICIO_PROJETO = '2026-08-05';   // 📅 Data oficial de arranque do contador
 
-// 🏷️ TITULOS OFICIAIS DO RANKING
+// 🏷️ TÍTULOS OFICIAIS DO RANKING
 const TITULOS_RANKING = [
   '👑 Campeão dos Finos',
   '🐂 Matulão',
@@ -80,7 +80,7 @@ const SONS_CELEBRACAO = [
   'https://assets.mixkit.co/active_storage/sfx/2070/2070-preview.mp3', 
   'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3', 
   'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3', 
-  'https://assets.mixkit.co/active_storage/sfx/131.mp3',               
+  'https://assets.mixkit.co/active_storage/sfx/131.mp3',                
 ];
 
 async function comprimirImagem(file: File, maxDimensao = 600, qualidade = 0.8): Promise<File> {
@@ -161,8 +161,32 @@ export default function Home() {
 
   useEffect(() => {
     fetchDados();
+
     const themeGuardado = localStorage.getItem('finos_theme');
     if (themeGuardado === 'dark') setDarkMode(true);
+
+    // ⚡ CANAL EM TEMPO REAL (SUPABASE REALTIME)
+    const canalRealtime = supabase
+      .channel('tempo-real-finos')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'finos' },
+        () => {
+          fetchDados();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'perfis' },
+        () => {
+          fetchDados();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(canalRealtime);
+    };
   }, []);
 
   const toggleDarkMode = () => {
@@ -310,7 +334,7 @@ export default function Home() {
     try {
       setLoading(true);
       const file = e.target.files?.[0];
-      let photoUrl: string | null = null; // Fix de TypeScript estrito
+      let photoUrl: string | null = null;
 
       if (file) {
         const fotoComprimida = await comprimirImagem(file);
