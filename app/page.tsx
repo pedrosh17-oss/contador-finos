@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 // ⚙️ CONFIGURAÇÃO RÁPIDA
 // ==========================================
 const TOTAL_GIFS = 1;                     // 👈 Número total de stickers em public/gifs/
-const META_FESTA_DIARIA = 20;              // 🎯 Aos 30 finos diários arranca o caos!
+const META_FESTA_DIARIA = 20;              // 🎯 Aos 20 finos diários arranca o caos!
 const DATA_INICIO_PROJETO = '2026-08-05';   // 📅 Data oficial de arranque do contador
 
 // 🏷️ TÍTULOS OFICIAIS DO RANKING
@@ -83,6 +83,47 @@ const SONS_CELEBRACAO = [
   'https://assets.mixkit.co/active_storage/sfx/131.mp3',                
 ];
 
+// ==========================================
+// 🔔 FUNÇÕES DE NOTIFICAÇÃO PUSH
+// ==========================================
+async function enviarNotificacao(title: string, body: string) {
+  try {
+    await fetch('/api/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body })
+    });
+  } catch (e) {
+    console.error('Erro push:', e);
+  }
+}
+
+async function ativarNotificacoesPush(perfilId: string) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    alert("O teu navegador não suporta notificações.");
+    return false;
+  }
+  
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return false;
+
+  const registration = await navigator.serviceWorker.ready;
+  let subscription = await registration.pushManager.getSubscription();
+
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa16bg4SIn1L-O5jJ2p3R3jPz96yQ4M_Yh7k29QJpXm3k7xZ4Y4v3k'
+    });
+  }
+
+  await supabase.from('push_subscriptions').upsert([
+    { perfil_id: perfilId, subscription }
+  ], { onConflict: 'perfil_id' });
+
+  return true;
+}
+
 async function comprimirImagem(file: File, maxDimensao = 600, qualidade = 0.8): Promise<File> {
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -136,6 +177,8 @@ export default function Home() {
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [novoNome, setNovoNome] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  const [pushStatus, setPushStatus] = useState<'default' | 'granted' | 'denied'>('default');
 
   // MODO DE REGISTO EM INÍCIO: INDIVIDUAL OU RODADA
   const [modoRegisto, setModoRegisto] = useState<'individual' | 'rodada'>('individual');
@@ -164,6 +207,10 @@ export default function Home() {
 
     const themeGuardado = localStorage.getItem('finos_theme');
     if (themeGuardado === 'dark') setDarkMode(true);
+    
+    if (typeof Notification !== 'undefined') {
+      setPushStatus(Notification.permission as any);
+    }
 
     // ⚡ CANAL EM TEMPO REAL (SUPABASE REALTIME)
     const canalRealtime = supabase
@@ -188,6 +235,18 @@ export default function Home() {
       supabase.removeChannel(canalRealtime);
     };
   }, []);
+
+  const handleAtivarNotificacoes = async () => {
+    if (!selectedUser) {
+      mostrarToast('Seleciona primeiro o teu nome para ativar as notificações!', 'erro');
+      return;
+    }
+    const sucesso = await ativarNotificacoesPush(selectedUser);
+    if (sucesso) {
+      setPushStatus('granted');
+      mostrarToast('Notificações ativadas com sucesso! 🔔', 'sucesso');
+    }
+  };
 
   const toggleDarkMode = () => {
     setDarkMode(prev => {
@@ -220,6 +279,19 @@ export default function Home() {
         const primeiroDia = new Date(dataFinos[0].data_hora).toLocaleDateString('pt-PT');
         setDiasAbertos((prev) => ({ ...prev, [primeiroDia]: true }));
       }
+      
+      // 🚨 VERIFICAR INATIVIDADE (CONAS DE SABÃO)
+      const umaSemanaAtrasMs = Date.now() - 7 * 86400000;
+      dataPerfis?.forEach(p => {
+        const pFinos = dataFinos.filter(f => f.perfil_id === p.id && f.tipo_bebida !== 'gregorio');
+        if (pFinos.length > 0) {
+          const ultimoFinoMs = new Date(pFinos[0].data_hora).getTime();
+          // Se o último fino foi há exatamente 7 dias (com margem de 1 min), dispara notificação
+          if (Date.now() - ultimoFinoMs >= 7 * 86400000 && Date.now() - ultimoFinoMs <= 7 * 86400000 + 60000) {
+            enviarNotificacao('🧼 ALERTA CONAS DE SABÃO!', `${p.nome} está há 1 semana sem beber.`);
+          }
+        }
+      });
     }
   }
 
@@ -366,6 +438,38 @@ export default function Home() {
         await supabase.from('finos').insert(listaInserir);
       }
       
+      // 🚨 REGRAS DE NOTIFICAÇÕES PUSH 🚨
+      const nomeUser = perfis.find(p => p.id === selectedUser)?.nome || 'Alguém';
+      const agoraHora = new Date().getHours();
+
+      if (modoRegisto === 'rodada') {
+         enviarNotificacao('💳 O CHEFE PAGOU UMA RODADA!', `${nomeUser} pagou uma rodada para ${bebedoresRodada.length} amigos! Paga o que deves!`);
+      } else {
+        if (agoraHora >= 3 && agoraHora < 6) {
+          enviarNotificacao('🎂 É PARABÉNS:', `${nomeUser} recusa-se a ir dormir e acabou de registar mais 1 fino. Já passa das 3 da manhã…`);
+        } else {
+          const finosHojeUser = (finosPorDataStr[hojeStrLocal] || []).filter(f => f.perfil_id === selectedUser).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0) + bebidaInfo.equivalencia;
+          if (finosHojeUser >= 5) {
+            enviarNotificacao('🔥 EM CHAMA!', `${nomeUser} vai no ${formatarFinos(finosHojeUser)}º fino do dia. Já deve tar meio pêssego`);
+          } else {
+            enviarNotificacao('🍺 LÁ VAI ELE!', `${nomeUser} fodeu as beiças a mais 1 fino!`);
+          }
+        }
+      }
+
+      if (contagemPorPessoa.length >= 2 && selectedUser !== contagemPorPessoa[0].id) {
+        const minhaPosicaoAntes = contagemPorPessoa.findIndex(p => p.id === selectedUser);
+        const meuTotalNovo = contagemPorPessoa[minhaPosicaoAntes].count + bebidaInfo.equivalencia;
+        if (minhaPosicaoAntes > 0 && meuTotalNovo > contagemPorPessoa[minhaPosicaoAntes - 1].count) {
+          const ultrapassado = contagemPorPessoa[minhaPosicaoAntes - 1].nome;
+          enviarNotificacao('🚨 ALERTA DE GOLPE DE ESTADO!', `${nomeUser} subiu na tabela e fodeu o lugar ao ${ultrapassado}! Você é pika! Você é o cara!`);
+        }
+      }
+
+      if (proximoMarco && (totalFinosGeralEq + bebidaInfo.equivalencia) >= proximoMarco.meta) {
+        enviarNotificacao('🏆 GRANDE FEITO ALCANÇADO!', `O grupo atingiu a meta dos ${proximoMarco.meta} finos!`);
+      }
+      
       dispararCelebracao();
       
       const frasesRandom = isModoFesta ? MENSAGENS_FESTA : MENSAGENS_DIVERTIDAS;
@@ -407,6 +511,9 @@ export default function Home() {
     try {
       setLoading(true);
       await supabase.from('finos').insert([{ perfil_id: selectedUser, tipo_bebida: 'gregorio', quantidade_equivalente: 0 }]);
+      const nomeVomitador = perfis.find(p => p.id === selectedUser)?.nome || 'Alguém';
+      enviarNotificacao('🤮 TEMOS HOMEM AO MAR!', `${nomeVomitador} gregou-se todo! A reputação desceu!`);
+      
       mostrarToast('Fizeste mau registado! A tua reputação desceu! 🤮', 'sucesso');
       fetchDados();
     } catch (err) { mostrarToast('Erro ao registar.', 'erro'); } finally { setLoading(false); }
@@ -674,20 +781,30 @@ export default function Home() {
           </div>
         )}
 
-        {/* CABEÇALHO */}
+        {/* CABEÇALHO COM BOTÃO DE NOTIFICAÇÕES */}
         <div className="flex justify-between items-center mb-2 pt-2">
           <h1 className={`text-2xl font-extrabold flex items-center gap-2 transition-all ${isModoFesta ? 'text-white drop-shadow-[0_0_10px_rgba(255,0,0,0.8)]' : darkMode ? 'text-amber-400' : 'text-amber-900'}`}>
             {isModoFesta ? 'É SEMPRE A VIRÁ-LOS' : '🍻 Contador'}
           </h1>
-          <button
-            onClick={toggleDarkMode}
-            className={`px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm ${
-              isModoFesta ? 'bg-black/50 text-white border-white/20' 
-              : darkMode ? 'bg-slate-900 text-amber-400 border-slate-800' : 'bg-white text-slate-700 border-slate-200'
-            }`}
-          >
-            {darkMode ? '☀️ Claro' : '🌙 Escuro'}
-          </button>
+          <div className="flex gap-2">
+            {pushStatus === 'default' && (
+              <button
+                onClick={handleAtivarNotificacoes}
+                className={`px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm bg-blue-500 text-white border-blue-600 animate-pulse`}
+              >
+                🔔 Ativar Alertas
+              </button>
+            )}
+            <button
+              onClick={toggleDarkMode}
+              className={`px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm ${
+                isModoFesta ? 'bg-black/50 text-white border-white/20' 
+                : darkMode ? 'bg-slate-900 text-amber-400 border-slate-800' : 'bg-white text-slate-700 border-slate-200'
+              }`}
+            >
+              {darkMode ? '☀️' : '🌙'}
+            </button>
+          </div>
         </div>
 
         {/* FITA DE AVISO CSS */}
