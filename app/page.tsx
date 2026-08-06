@@ -121,7 +121,7 @@ async function ativarNotificacoesPush(perfilId: string) {
   const registration = await navigator.serviceWorker.register('/sw.js');
   await navigator.serviceWorker.ready;
 
-  const pubKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFLDnG2tikGutjEDfa5xyg4bGaJZ2wftHDiRvY-bPzttKqhjWwsH9VN2MkVfpHDqwEt7i8AZnZqdnUDQPGZBR08';
+  const pubKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BCYisANNmub1PBy-VT3OWqn33kZUFR6e74dtCi_xxNtMZV37EI12QDtxNUOHjQYQGlTAHGcTCTKVNW_IaAF5Znc';
   const applicationServerKey = urlBase64ToUint8Array(pubKey);
 
   // Cancela a subscrição antiga para garantir que renova com a chave correta

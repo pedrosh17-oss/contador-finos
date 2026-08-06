@@ -8,8 +8,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFLDnG2tikGutjEDfa5xyg4bGaJZ2wftHDiRvY-bPzttKqhjWwsH9VN2MkVfpHDqwEt7i8AZnZqdnUDQPGZBR08';
-const privateKey = process.env.VAPID_PRIVATE_KEY || 'Ffn43KYGfSv1SQ0GPTlA4yAcTJ9TzscX26CrKeSCwkw';
+const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BCYisANNmub1PBy-VT3OWqn33kZUFR6e74dtCi_xxNtMZV37EI12QDtxNUOHjQYQGlTAHGcTCTKVNW_IaAF5Znc';
+const privateKey = process.env.VAPID_PRIVATE_KEY || '_b8BWMgvi2clGSRPAFqo96GremMwmButtYB94BG0lZg';
 
 webpush.setVapidDetails(
   'mailto:grupo@contadorfinos.com',
