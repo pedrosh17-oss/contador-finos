@@ -6,8 +6,8 @@ import { supabase } from '../lib/supabase';
 // ==========================================
 // ⚙️ CONFIGURAÇÃO RÁPIDA
 // ==========================================
-const TOTAL_GIFS = 1;                     // 👈 Número total de stickers em public/gifs/
-const META_FESTA_DIARIA = 20;              // 🎯 Aos 30 finos diários arranca o caos!
+const TOTAL_GIFS = 10;                     // 👈 Número total de stickers em public/gifs/
+const META_FESTA_DIARIA = 30;              // 🎯 Aos 30 finos diários arranca o caos!
 const DATA_INICIO_PROJETO = '2026-08-05';   // 📅 Data oficial de arranque do contador
 
 // 🏷️ TITULOS OFICIAIS DO RANKING
@@ -310,7 +310,7 @@ export default function Home() {
     try {
       setLoading(true);
       const file = e.target.files?.[0];
-      let photoUrl = null;
+      let photoUrl: string | null = null; // Fix de TypeScript estrito
 
       if (file) {
         const fotoComprimida = await comprimirImagem(file);
@@ -324,7 +324,6 @@ export default function Home() {
       const bebidaInfo = TIPOS_BEBIDA[tipoBebidaSelecionado];
 
       if (modoRegisto === 'individual') {
-        // REGISTO INDIVIDUAL
         await supabase.from('finos').insert([{ 
           perfil_id: selectedUser, 
           foto_url: photoUrl,
@@ -332,13 +331,12 @@ export default function Home() {
           quantidade_equivalente: bebidaInfo.equivalencia
         }]);
       } else {
-        // REGISTO DE RODADA (PARTILHA A MESMA FOTO PARA TODOS OS PARTICIPANTES)
         const listaInserir = bebedoresRodada.map(pId => ({
           perfil_id: pId,
           foto_url: photoUrl,
           tipo_bebida: tipoBebidaSelecionado,
           quantidade_equivalente: bebidaInfo.equivalencia,
-          pagador_id: selectedUser // Guarda quem pagou a rodada!
+          pagador_id: selectedUser
         }));
 
         await supabase.from('finos').insert(listaInserir);
@@ -395,22 +393,18 @@ export default function Home() {
     setModalGregorioOpen(true);
   }
 
-  // CÁLCULO DE CRACHÁS/MEDALHAS
   function calcularConquistas(userFinosValidos: any[], userId: string) {
     const list: string[] = [];
     
-    // CRACHÁS TEMPORAIS DE CAMPEÃO
     if (userId === campeaoSemanaId && maxSemana > 0) list.push('👑 Campeão da Semana');
     if (userId === campeaoMesId && maxMes > 0) list.push('🏆 Campeão do Mês');
 
-    // CRACHÁ: 💸 PAGA-RODADAS (Quantas rodadas pagou no total)
     const rodadasPagas = finos.filter(f => f.pagador_id === userId).length;
     if (rodadasPagas > 0) {
       const rodadasUnicas = new Set(finos.filter(f => f.pagador_id === userId).map(f => f.data_hora)).size;
       list.push(`💸 Paga-Rodadas (${rodadasUnicas}x)`);
     }
 
-    // CRACHÁ: 🌵 DESERTO (Não bebeu nenhum fino na última semana)
     const umaSemanaAtrasMs = Date.now() - 7 * 86400000;
     const bebeuNaUltimaSemana = userFinosValidos.some(f => new Date(f.data_hora).getTime() >= umaSemanaAtrasMs);
     if (!bebeuNaUltimaSemana && userFinosValidos.length > 0) {
