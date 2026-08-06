@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 // ==========================================
 // CONFIGURAÇÕES GERAIS E MODO FESTA
 // ==========================================
-const META_FESTA_DIARIA = 20; // 🎯 Aos 30 finos diários arranca o caos!
+const META_FESTA_DIARIA = 20; // 🎯 Aos 20 finos diários arranca o caos!
 
 const TIPOS_BEBIDA = {
   fino: { label: '🍺 Fino / Mini', equivalencia: 1.0, emoji: '🍺' },
@@ -179,9 +179,6 @@ export default function Home() {
     }
   }
 
-  // ==========================================
-  // MATEMÁTICA E AGRUPAMENTOS
-  // ==========================================
   const finosValidos = finos.filter(f => f.tipo_bebida !== 'gregorio');
 
   const inicioSemana = new Date();
@@ -218,7 +215,6 @@ export default function Home() {
     }
   }
 
-  // 🚨 GATILHO: MODO FESTA 🚨
   const hojeStrLocal = new Date().toLocaleDateString('pt-PT');
   const finosBebidosHoje = (finosPorDataStr[hojeStrLocal] || []).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
   const isModoFesta = finosBebidosHoje >= META_FESTA_DIARIA;
@@ -342,7 +338,24 @@ export default function Home() {
       const count = userFinosFiltrados.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
       const gregorios = userFinosGeral.filter(f => f.tipo_bebida === 'gregorio').length;
       const conquistas = calcularConquistas(userFinosValidos);
-      return { ...p, count, conquistas, gregorios, userFinosValidos };
+
+      // NOVO: CALCULAR O PERÍODO DE PICO DO UTILIZADOR
+      const periodos = { 'Madrugada': 0, 'Manhã': 0, 'Tarde': 0, 'Noite': 0 };
+      userFinosValidos.forEach(f => {
+        const h = new Date(f.data_hora).getHours();
+        const val = f.quantidade_equivalente ?? 1;
+        if (h >= 0 && h < 6) periodos['Madrugada'] += val;
+        else if (h >= 6 && h < 12) periodos['Manhã'] += val;
+        else if (h >= 12 && h < 18) periodos['Tarde'] += val;
+        else periodos['Noite'] += val;
+      });
+      let periodoForte = '';
+      let maxP = 0;
+      for (const [k, v] of Object.entries(periodos)) {
+        if (v > maxP && v > 0) { maxP = v; periodoForte = k; }
+      }
+
+      return { ...p, count, conquistas, gregorios, userFinosValidos, periodoForte };
     })
     .sort((a, b) => b.count - a.count);
 
@@ -371,7 +384,6 @@ export default function Home() {
     return { id: p.id, nome: p.nome, maxStreak: maxS, currentStreak: curS };
   });
 
-  // RESTAURAÇÃO DAS CURIOSIDADES E RITMOS
   const horasCount = { 'Madrugada': 0, 'Manhã': 0, 'Tarde': 0, 'Noite': 0 };
   const diasSemanaCount = [0, 0, 0, 0, 0, 0, 0];
   const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -661,7 +673,8 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {(p.conquistas.length > 0 || userCurrentStreak > 1 || p.gregorios > 0) && (
+                      {/* CRACHÁS SEMPRE VISÍVEIS MESMO ANTES DE ABRIR */}
+                      {(p.conquistas.length > 0 || userCurrentStreak > 1 || p.gregorios > 0 || p.periodoForte) && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {p.gregorios > 0 && (
                             <span className="bg-red-500/10 text-red-400 border border-red-500/30 text-[10px] px-1.5 py-0.5 rounded-md font-bold">
@@ -671,6 +684,11 @@ export default function Home() {
                           {userCurrentStreak > 1 && (
                             <span className="bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[10px] px-1.5 py-0.5 rounded-md font-bold">
                               🔥 {userCurrentStreak} Dias
+                            </span>
+                          )}
+                          {p.periodoForte && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${isModoFesta ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' : 'bg-cyan-500/10 text-cyan-600 border-cyan-500/30'}`}>
+                              🕒 Forte: {p.periodoForte}
                             </span>
                           )}
                           {p.conquistas.map((badgeText: string, i: number) => (
@@ -693,8 +711,9 @@ export default function Home() {
                                   {fotosUser.map(f => (
                                     <div key={f.id} className="relative group cursor-pointer" onClick={() => setFotoExpandida(f.foto_url)}>
                                       <img src={f.foto_url} loading="lazy" className="w-full h-28 object-cover rounded-lg shadow-sm hover:opacity-90 transition" alt="Fino"/>
-                                      <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[8px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm">
-                                        {new Date(f.data_hora).toLocaleDateString('pt-PT')}
+                                      {/* DATA E HORA NA FOTO */}
+                                      <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[8px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm tracking-wide">
+                                        {new Date(f.data_hora).toLocaleDateString('pt-PT', {day:'2-digit', month:'2-digit', year:'2-digit'})} {new Date(f.data_hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
                                       </div>
                                     </div>
                                   ))}
