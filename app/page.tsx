@@ -26,10 +26,12 @@ const TITULOS_RANKING = [
   '🧼 Conas de sabão, faz-te homem!'
 ];
 
+// 🍻 NOVOS TIPOS DE BEBIDA E EQUIVALÊNCIAS
 const TIPOS_BEBIDA = {
-  fino: { label: '🍺 Fino / Mini', equivalencia: 1.0, emoji: '🍺' },
-  principe: { label: '🍾 Garrafa / Príncipe', equivalencia: 1.5, emoji: '🍾' },
-  caneca: { label: '🪨 Caneca', equivalencia: 2.0, emoji: '🪨' }
+  fino: { label: '🥂 Fino / Mini', equivalencia: 1.0, emoji: '🥂' },
+  principe: { label: '🥃 Príncipe / Garrafa', equivalencia: 1.5, emoji: '🥃' },
+  caneca: { label: '🍺 Caneca', equivalencia: 2.5, emoji: '🍺' },
+  pint: { label: '🖌️ Pint', equivalencia: 2.8, emoji: '🖌️' }
 } as const;
 
 type TipoBebidaKey = keyof typeof TIPOS_BEBIDA;
@@ -72,7 +74,7 @@ const MARCOS_GRUPO = [
   { meta: 800, texto: "O guito acumulado é o valor comercial de um iPhone 15 Pro de 256GB. O telemóvel tira fotos em 4K, mas tambem… que se foda." },
   { meta: 850, texto: "O peso total da cerveja é superior ao de duas motas scooter de 125cc juntas. RESPECT!" },
   { meta: 900, texto: "180 Litros OU CRL... O guito daria para pagar a renda de um T1 fora do centro durante 2 meses." },
-  { meta: 950, texto: "O volume enchia o estômago de um camelo adulto até ele não ter mais sede. QUE CAMPEÕES!" },
+  { meta: 950, texto: "O volume enchia o estômago de camelo adulto até ele não ter mais sede. QUE CAMPEÕES!" },
   { meta: 1000, texto: "1.000 FINOS! 200 LITROS DE CERVEJA! O volume total enchia rigorosamente a bagageira de um Volkswagen Golf de 2020 até ao teto! Somos grandes!" }
 ];
 
@@ -135,7 +137,6 @@ async function ativarNotificacoesPush(perfilId: string) {
     applicationServerKey
   });
 
-  // 🔴 AQUI ESTÁ A ÚNICA MUDANÇA (subscription.toJSON()):
   await supabase.from('push_subscriptions').upsert([
     { perfil_id: perfilId, subscription: subscription.toJSON() }
   ], { onConflict: 'perfil_id' });
@@ -460,13 +461,13 @@ export default function Home() {
          enviarNotificacao('💳 O CHEFE PAGOU UMA RODADA!', `${nomeUser} pagou uma rodada para ${bebedoresRodada.length} amigos! Paga o que deves!`);
       } else {
         if (agoraHora >= 3 && agoraHora < 6) {
-          enviarNotificacao('🎂 É PARABÉNS:', `${nomeUser} recusa-se a ir dormir e acabou de registar mais 1 fino. Já passa das 3 da manhã…`);
+          enviarNotificacao('🎂 É PARABÉNS:', `${nomeUser} recusa-se a ir dormir e acabou de registar mais 1 bebida. Já passa das 3 da manhã…`);
         } else {
           const finosHojeUser = (finosPorDataStr[hojeStrLocal] || []).filter(f => f.perfil_id === selectedUser).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0) + bebidaInfo.equivalencia;
           if (finosHojeUser >= 5) {
-            enviarNotificacao('🔥 EM CHAMA!', `${nomeUser} vai no ${formatarFinos(finosHojeUser)}º fino do dia. Já deve tar meio pêssego`);
+            enviarNotificacao('🔥 EM CHAMA!', `${nomeUser} vai no equivalente a ${formatarFinos(finosHojeUser)} finos hoje. Já deve tar meio pêssego`);
           } else {
-            enviarNotificacao('🍺 LÁ VAI ELE!', `${nomeUser} fodeu as beiças a mais 1 fino!`);
+            enviarNotificacao('🍺 LÁ VAI ELE!', `${nomeUser} fodeu as beiças a mais uma bebida!`);
           }
         }
       }
@@ -481,7 +482,7 @@ export default function Home() {
       }
 
       if (proximoMarco && (totalFinosGeralEq + bebidaInfo.equivalencia) >= proximoMarco.meta) {
-        enviarNotificacao('🏆 GRANDE FEITO ALCANÇADO!', `O grupo atingiu a meta dos ${proximoMarco.meta} finos!`);
+        enviarNotificacao('🏆 GRANDE FEITO ALCANÇADO!', `O grupo atingiu a meta equivalente a ${proximoMarco.meta} finos!`);
       }
       
       dispararCelebracao();
@@ -572,10 +573,10 @@ export default function Home() {
     }
     
     const totalEq = userFinosValidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
-    if (totalEq >= 1) list.push('🌱 Primeiro Fino');
-    if (totalEq >= 10) list.push('🥉 10 Finos');
-    if (totalEq >= 25) list.push('🥈 25 Finos');
-    if (totalEq >= 50) list.push('🥇 50 Finos');
+    if (totalEq >= 1) list.push('🌱 Primeira Bebida');
+    if (totalEq >= 10) list.push('🥉 Equivalente a 10 Finos');
+    if (totalEq >= 25) list.push('🥈 Equivalente a 25 Finos');
+    if (totalEq >= 50) list.push('🥇 Equivalente a 50 Finos');
     return list;
   }
 
@@ -853,7 +854,7 @@ export default function Home() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className={`p-4 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
-                <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Total do Grupo</p>
+                <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Total Equivalente</p>
                 <p className={`text-3xl font-black leading-tight mt-1 ${isModoFesta ? 'text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'text-amber-500'}`}>{formatarFinos(totalFinosGeralEq)}</p>
               </div>
               <div className={`p-4 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
@@ -874,7 +875,7 @@ export default function Home() {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                🍺 Fino Individual
+                🥂 Registo Individual
               </button>
               <button
                 onClick={() => setModoRegisto('rodada')}
@@ -947,7 +948,8 @@ export default function Home() {
               <label className={`block font-extrabold text-xs uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/70' : darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                 O que estão a beber?
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              {/* ⚠️ Grelha alterada para 2 colunas para suportar 4 botões de forma bonita */}
+              <div className="grid grid-cols-2 gap-2">
                 {(Object.keys(TIPOS_BEBIDA) as TipoBebidaKey[]).map((key) => {
                   const item = TIPOS_BEBIDA[key];
                   const isSelected = tipoBebidaSelecionado === key;
@@ -961,8 +963,8 @@ export default function Home() {
                       }`}
                     >
                       <span className="text-xl">{item.emoji}</span>
-                      <span className="text-[10px] uppercase font-bold leading-tight">{key}</span>
-                      <span className="text-[9px] opacity-80">({item.equivalencia}x)</span>
+                      <span className="text-[10px] uppercase font-bold leading-tight">{item.label.split(' ')[1]}</span>
+                      <span className="text-[9px] opacity-80">({item.equivalencia}x finos)</span>
                     </button>
                   );
                 })}
@@ -978,7 +980,7 @@ export default function Home() {
                   : 'bg-slate-700 text-slate-500 cursor-not-allowed'
               }`}>
                 {loading 
-                  ? 'A guardar... 🍺' 
+                  ? 'A guardar... 🍻' 
                   : modoRegisto === 'rodada'
                     ? '💳 CONFIRMAR RODADA PAGA!'
                     : isModoFesta 
@@ -1131,7 +1133,7 @@ export default function Home() {
                   <div className={`border rounded-xl p-3 space-y-3 ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                     <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
                       <span className={`w-1/3 text-left font-black text-lg ${f1Stats.count > f2Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f1Stats.count)}</span>
-                      <span className="w-1/3 text-center text-[9px] uppercase font-bold text-slate-500">Total Finos</span>
+                      <span className="w-1/3 text-center text-[9px] uppercase font-bold text-slate-500">Total Equivalente</span>
                       <span className={`w-1/3 text-right font-black text-lg ${f2Stats.count > f1Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f2Stats.count)}</span>
                     </div>
                   </div>
@@ -1188,7 +1190,7 @@ export default function Home() {
             <div className={`p-5 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-black text-xl mb-1 flex items-center gap-2">🎲 Sorteador da Rodada</h2>
               <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                Seleciona quem está presente na mesa para sortear quem paga a próxima rodada de finos!
+                Seleciona quem está presente na mesa para sortear quem paga a próxima rodada de bebidas!
               </p>
 
               <div className="flex justify-between items-center mb-3">
@@ -1291,7 +1293,7 @@ export default function Home() {
                   if (alcancado) {
                     return (
                       <div key={marco.meta} className={`p-3 rounded-xl border ${isModoFesta ? 'bg-white/10 border-white/30 text-white' : darkMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-50' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
-                        <div className={`font-black text-sm mb-1 ${isModoFesta ? 'text-red-400' : 'text-amber-500'}`}>🏆 {marco.meta} Finos Alcançados</div>
+                        <div className={`font-black text-sm mb-1 ${isModoFesta ? 'text-red-400' : 'text-amber-500'}`}>🏆 Equivalente a {marco.meta} Finos</div>
                         <p className="text-xs font-medium leading-relaxed opacity-90">{marco.texto}</p>
                       </div>
                     );
@@ -1318,7 +1320,7 @@ export default function Home() {
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-bold text-lg mb-3 border-b pb-2 border-slate-800/50">📅 Fotos e Histórico</h2>
               {Object.keys(finosPorDiaParaLista).length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-4">Ainda não há finos registados.</p>
+                <p className="text-xs text-slate-500 text-center py-4">Ainda não há bebidas registadas.</p>
               ) : (
                 <div className="space-y-3">
                   {Object.entries(finosPorDiaParaLista).map(([dia, listaFinos]) => {
@@ -1329,14 +1331,14 @@ export default function Home() {
                       <div key={dia} className={`border rounded-2xl overflow-hidden ${isModoFesta ? 'border-white/20 bg-black/40' : darkMode ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
                         <button onClick={() => toggleDia(dia)} className={`w-full p-3 flex justify-between items-center text-left transition ${isModoFesta ? 'bg-white/5 hover:bg-white/10' : darkMode ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-100 hover:bg-slate-200'}`}>
                           <span className="font-bold text-xs capitalize">{dia}</span>
-                          <span className={`text-xs border font-black px-2.5 py-0.5 rounded-full ${isModoFesta ? 'bg-white/20 text-white border-white/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>{formatarFinos(totalDiaEq)} finos {estaAberto ? '▲' : '▼'}</span>
+                          <span className={`text-xs border font-black px-2.5 py-0.5 rounded-full ${isModoFesta ? 'bg-white/20 text-white border-white/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>{formatarFinos(totalDiaEq)} eqv {estaAberto ? '▲' : '▼'}</span>
                         </button>
                         {estaAberto && (
                           <div className={`p-3 space-y-3 ${isModoFesta ? 'bg-black/20' : darkMode ? 'bg-slate-950' : 'bg-white'}`}>
                             {listaFinos.map((f) => {
                               const isGregorio = f.tipo_bebida === 'gregorio';
                               const bebidaKey = (f.tipo_bebida as TipoBebidaKey) || 'fino';
-                              const emojiBebida = isGregorio ? '🤮' : (TIPOS_BEBIDA[bebidaKey]?.emoji || '🍺');
+                              const emojiBebida = isGregorio ? '🤮' : (TIPOS_BEBIDA[bebidaKey]?.emoji || '🥂');
                               
                               return (
                                 <div key={f.id} className="border-b border-slate-800/50 pb-2 last:border-0">
@@ -1354,7 +1356,7 @@ export default function Home() {
                                     <span className="text-slate-500">{new Date(f.data_hora).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                   </div>
                                   {f.foto_url && (
-                                    <img src={f.foto_url} alt="Fino" loading="lazy" onClick={() => setFotoExpandida(f.foto_url)} className="w-full h-40 object-cover rounded-xl shadow-sm mt-1 cursor-pointer hover:opacity-90 transition" />
+                                    <img src={f.foto_url} alt="Bebida" loading="lazy" onClick={() => setFotoExpandida(f.foto_url)} className="w-full h-40 object-cover rounded-xl shadow-sm mt-1 cursor-pointer hover:opacity-90 transition" />
                                   )}
                                 </div>
                               );
