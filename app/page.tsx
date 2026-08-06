@@ -29,7 +29,7 @@ const MENSAGENS_FESTA = [
   'JÁ NÃO HÁ REGRAS! 🚀',
   'VAI COM O CARALHO FÍGADO! 🪩',
   'NINGUÉM DORME HOJE! 🍻',
-  'CHAMA A GNR! 🚓',
+  'CHAMA A GNR! 传输',
   'ESTAMOS A DESTRUIR TUDO! 💥',
   'HOJE É ATÉ DE MANHÃ! 🧛‍♂️',
   'BEBE ATÉ ESQUECERES A PASSWORD MBWAY! 💳'
@@ -111,8 +111,6 @@ export default function Home() {
   const [toast, setToast] = useState<{msg: string, tipo: 'erro' | 'sucesso'} | null>(null);
 
   const [modalGregorioOpen, setModalGregorioOpen] = useState(false);
-  
-  // ESTADO PARA EXPANDIR UTILIZADORES NO RANKING (ACCORDION)
   const [usersExpandidos, setUsersExpandidos] = useState<{ [key: string]: boolean }>({});
 
   const [perfis, setPerfis] = useState<any[]>([]);
@@ -181,7 +179,6 @@ export default function Home() {
     }
   }
 
-  // MATEMÁTICA E AGRUPAMENTOS
   const finosValidos = finos.filter(f => f.tipo_bebida !== 'gregorio');
 
   const inicioSemana = new Date();
@@ -218,7 +215,6 @@ export default function Home() {
     }
   }
 
-  // 🚨 GATILHO: MODO FESTA 🚨
   const hojeStrLocal = new Date().toLocaleDateString('pt-PT');
   const finosBebidosHoje = (finosPorDataStr[hojeStrLocal] || []).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
   const isModoFesta = finosBebidosHoje >= META_FESTA_DIARIA;
@@ -386,7 +382,6 @@ export default function Home() {
     { id: 'historico', label: 'Galeria', icon: '📸' }
   ] as const;
 
-  // ESTILOS DINÂMICOS
   const mainWrapperClasses = isModoFesta 
     ? 'brutal-bg text-white' 
     : darkMode ? 'bg-slate-950 text-slate-100' : 'bg-amber-50 text-slate-900';
@@ -397,9 +392,18 @@ export default function Home() {
 
   return (
     <>
-      {/* INJEÇÃO DE CSS BRUTAL */}
-      {isModoFesta && (
-        <style>{`
+      {/* ESTILOS DE ANIMAÇÃO COMPATÍVEIS COM REACT/NEXT */}
+      <style>{`
+        @keyframes marqueeScroll {
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
+        }
+        .animate-marquee {
+          display: inline-block;
+          white-space: nowrap;
+          animation: marqueeScroll 8s linear infinite;
+        }
+        ${isModoFesta ? `
           @keyframes discoBg {
             0% { background-position: 0% 50%; }
             50% { background-position: 100% 50%; }
@@ -420,8 +424,8 @@ export default function Home() {
           .brutal-shake {
             animation: shakeBrutal 0.15s infinite;
           }
-        `}</style>
-      )}
+        ` : ''}
+      `}</style>
 
       <main className={`min-h-screen p-4 max-w-md mx-auto font-sans pb-24 relative transition-all duration-1000 ${mainWrapperClasses}`}>
 
@@ -437,7 +441,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* CABEÇALHO (ponto 1: sem bola de espelhos) */}
+        {/* CABEÇALHO */}
         <div className="flex justify-between items-center mb-2 pt-2">
           <h1 className={`text-2xl font-extrabold flex items-center gap-2 transition-all ${isModoFesta ? 'text-white drop-shadow-[0_0_10px_rgba(255,0,0,0.8)]' : darkMode ? 'text-amber-400' : 'text-amber-900'}`}>
             {isModoFesta ? 'É SEMPRE A VIRÁ-LOS' : '🍻 Contador'}
@@ -453,12 +457,12 @@ export default function Home() {
           </button>
         </div>
 
-        {/* FITA DE AVISO (ponto 4: sem "ninguém dorme") */}
+        {/* FITA DE AVISO CSS (Sem tag marquee para não dar erro no Vercel) */}
         {isModoFesta && abaAtiva === 'inicio' && (
-          <div className="mb-4 rounded-lg overflow-hidden border-2 border-yellow-400 shadow-[0_0_15px_red]">
-            <marquee scrollamount="10" className="text-lg font-black text-yellow-300 bg-red-600 py-1.5 uppercase tracking-widest block leading-none">
+          <div className="mb-4 rounded-lg overflow-hidden border-2 border-yellow-400 shadow-[0_0_15px_red] bg-red-600 py-1.5">
+            <div className="animate-marquee text-lg font-black text-yellow-300 uppercase tracking-widest leading-none">
               🚨 O FÍGADO QUE SE FODA! 🚨 MODO DESTRUIÇÃO ATIVADO 🚨 MANDA VIR CRL! 🚨
-            </marquee>
+            </div>
           </div>
         )}
 
@@ -561,7 +565,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR 2: RANKING (pontos 2 e 3: crachás sempre visíveis + expansão em accordion) */}
+        {/* SEPARADOR 2: RANKING */}
         {abaAtiva === 'ranking' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
@@ -604,7 +608,6 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {/* PONTO 2: CRACHÁS SEMPRE VISÍVEIS MESMO ANTES DE ABRIR */}
                       {(p.conquistas.length > 0 || userCurrentStreak > 1 || p.gregorios > 0) && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {p.gregorios > 0 && (
@@ -625,7 +628,6 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* PONTO 3: MENU INDIVIDUAL EXPANDIDO PARA BAIXO (ACCORDION) */}
                       {estaExpandido && (
                         <div className="mt-3 pt-3 border-t border-slate-800/50 space-y-3 cursor-default" onClick={(e) => e.stopPropagation()}>
                           <div className="text-xs">
