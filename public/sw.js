@@ -7,5 +7,5 @@ self.addEventListener('install', (event) => {
   });
   
   self.addEventListener('fetch', (event) => {
-    // Requisito PWA para o Android
+    event.respondWith(fetch(event.request));
   });
