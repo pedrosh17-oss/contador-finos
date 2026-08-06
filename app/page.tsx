@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 // ==========================================
 // CONFIGURAÇÕES GERAIS E MODO FESTA
 // ==========================================
-const META_FESTA_DIARIA = 20; // 🎯 Aos 20 finos diários arranca o caos!
+const META_FESTA_DIARIA = 20; // 🎯 Aos 30 finos diários arranca o caos!
 
 const TIPOS_BEBIDA = {
   fino: { label: '🍺 Fino / Mini', equivalencia: 1.0, emoji: '🍺' },
@@ -29,7 +29,7 @@ const MENSAGENS_FESTA = [
   'JÁ NÃO HÁ REGRAS! 🚀',
   'VAI COM O CARALHO FÍGADO! 🪩',
   'NINGUÉM DORME HOJE! 🍻',
-  'CHAMA A GNR! 传输',
+  'CHAMA A GNR! 🚓',
   'ESTAMOS A DESTRUIR TUDO! 💥',
   'HOJE É ATÉ DE MANHÃ! 🧛‍♂️',
   'BEBE ATÉ ESQUECERES A PASSWORD MBWAY! 💳'
@@ -179,6 +179,9 @@ export default function Home() {
     }
   }
 
+  // ==========================================
+  // MATEMÁTICA E AGRUPAMENTOS
+  // ==========================================
   const finosValidos = finos.filter(f => f.tipo_bebida !== 'gregorio');
 
   const inicioSemana = new Date();
@@ -215,6 +218,7 @@ export default function Home() {
     }
   }
 
+  // 🚨 GATILHO: MODO FESTA 🚨
   const hojeStrLocal = new Date().toLocaleDateString('pt-PT');
   const finosBebidosHoje = (finosPorDataStr[hojeStrLocal] || []).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
   const isModoFesta = finosBebidosHoje >= META_FESTA_DIARIA;
@@ -367,6 +371,55 @@ export default function Home() {
     return { id: p.id, nome: p.nome, maxStreak: maxS, currentStreak: curS };
   });
 
+  // RESTAURAÇÃO DAS CURIOSIDADES E RITMOS
+  const horasCount = { 'Madrugada': 0, 'Manhã': 0, 'Tarde': 0, 'Noite': 0 };
+  const diasSemanaCount = [0, 0, 0, 0, 0, 0, 0];
+  const nomesDias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  
+  finosValidos.forEach(f => {
+    const data = new Date(f.data_hora);
+    const h = data.getHours();
+    const val = f.quantidade_equivalente ?? 1;
+    if (h >= 0 && h < 6) horasCount['Madrugada'] += val;
+    else if (h >= 6 && h < 12) horasCount['Manhã'] += val;
+    else if (h >= 12 && h < 18) horasCount['Tarde'] += val;
+    else horasCount['Noite'] += val;
+    diasSemanaCount[data.getDay()] += val;
+  });
+  
+  const maxHoraCount = Math.max(...Object.values(horasCount), 1);
+  const maxDiaCount = Math.max(...diasSemanaCount, 1);
+
+  const ritmoUsers: { id: string, nome: string, paceMin: number }[] = [];
+  perfis.forEach(p => {
+    const pFinos = finosValidos.filter(f => f.perfil_id === p.id).sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
+    let totalDiff = 0, countDiff = 0;
+    const finosPorDia: { [key: string]: any[] } = {};
+    pFinos.forEach(f => {
+      const d = new Date(f.data_hora).toLocaleDateString('pt-PT');
+      if (!finosPorDia[d]) finosPorDia[d] = [];
+      finosPorDia[d].push(f);
+    });
+    Object.values(finosPorDia).forEach(listaDia => {
+      for (let i = 0; i < listaDia.length - 1; i++) {
+        const diffMs = new Date(listaDia[i + 1].data_hora).getTime() - new Date(listaDia[i].data_hora).getTime();
+        if (diffMs < 6 * 3600000) { totalDiff += diffMs; countDiff++; }
+      }
+    });
+    if (countDiff > 0) ritmoUsers.push({ id: p.id, nome: p.nome, paceMin: Math.round((totalDiff / countDiff) / 60000) });
+  });
+  ritmoUsers.sort((a, b) => a.paceMin - b.paceMin);
+
+  function getFighterStats(id: string) {
+    const pCount = contagemPorPessoa.find(p => p.id === id)?.count || 0;
+    const pStreak = statsStreaks.find(s => s.id === id)?.maxStreak || 0;
+    const pRitmo = ritmoUsers.find(r => r.id === id)?.paceMin || Infinity;
+    return { count: pCount, streak: pStreak, ritmo: pRitmo };
+  }
+  
+  const f1Stats = fighter1 ? getFighterStats(fighter1) : null;
+  const f2Stats = fighter2 ? getFighterStats(fighter2) : null;
+
   const toggleDia = (dia: string) => setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
   const finosPorDiaParaLista = finos.reduce((acc: { [key: string]: any[] }, fino) => {
     const dataStr = new Date(fino.data_hora).toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -392,7 +445,6 @@ export default function Home() {
 
   return (
     <>
-      {/* ESTILOS DE ANIMAÇÃO COMPATÍVEIS COM REACT/NEXT */}
       <style>{`
         @keyframes marqueeScroll {
           0% { transform: translateX(100%); }
@@ -429,7 +481,6 @@ export default function Home() {
 
       <main className={`min-h-screen p-4 max-w-md mx-auto font-sans pb-24 relative transition-all duration-1000 ${mainWrapperClasses}`}>
 
-        {/* TOAST NOTIFICATIONS */}
         {toast && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex justify-center px-4 duration-300 w-full max-w-sm">
             <div className={`px-4 py-3 rounded-2xl shadow-2xl font-black text-sm flex items-center gap-2 w-full justify-center transition-all ${
@@ -457,7 +508,7 @@ export default function Home() {
           </button>
         </div>
 
-        {/* FITA DE AVISO CSS (Sem tag marquee para não dar erro no Vercel) */}
+        {/* FITA DE AVISO CSS */}
         {isModoFesta && abaAtiva === 'inicio' && (
           <div className="mb-4 rounded-lg overflow-hidden border-2 border-yellow-400 shadow-[0_0_15px_red] bg-red-600 py-1.5">
             <div className="animate-marquee text-lg font-black text-yellow-300 uppercase tracking-widest leading-none">
@@ -565,9 +616,11 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR 2: RANKING */}
+        {/* SEPARADOR 2: RANKING E ESTATÍSTICAS COMPLETAS */}
         {abaAtiva === 'ranking' && (
           <div className="space-y-6">
+            
+            {/* TABELA GERAL */}
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <div className="flex justify-between items-center mb-3 border-b pb-2 border-slate-800/50">
                 <h2 className="font-bold text-lg flex items-center gap-2">📊 Tabela Geral</h2>
@@ -631,7 +684,7 @@ export default function Home() {
                       {estaExpandido && (
                         <div className="mt-3 pt-3 border-t border-slate-800/50 space-y-3 cursor-default" onClick={(e) => e.stopPropagation()}>
                           <div className="text-xs">
-                            <p className="font-bold mb-2 text-amber-500">📸 Galeria Pessoal de {p.nome}</p>
+                            <p className={`font-bold mb-2 ${isModoFesta ? 'text-fuchsia-300' : 'text-amber-500'}`}>📸 Galeria Pessoal de {p.nome}</p>
                             {(() => {
                               const fotosUser = finosValidos.filter(f => f.perfil_id === p.id && f.foto_url);
                               if (fotosUser.length === 0) return <p className="text-[11px] text-slate-500 py-1">Sem fotos registadas.</p>;
@@ -656,6 +709,72 @@ export default function Home() {
                 })}
               </div>
             </div>
+
+            {/* FRENTE A FRENTE 1V1 (RESTAURO) */}
+            {perfis.length >= 2 && finosValidos.length > 0 && (
+              <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
+                <h2 className="font-bold text-lg mb-3 border-b pb-2 border-slate-800/50 flex items-center gap-2">⚔️ Frente-a-Frente</h2>
+                <div className="flex gap-2 items-center mb-4">
+                  <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter1} onChange={(e) => setFighter1(e.target.value)}>
+                    <option value="">Desafiante 1</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                  </select>
+                  <span className="font-black text-slate-500 text-sm">VS</span>
+                  <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter2} onChange={(e) => setFighter2(e.target.value)}>
+                    <option value="">Desafiante 2</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                  </select>
+                </div>
+                {fighter1 && fighter2 && fighter1 !== fighter2 && f1Stats && f2Stats && (
+                  <div className={`border rounded-xl p-3 space-y-3 ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                      <span className={`w-1/3 text-left font-black text-lg ${f1Stats.count > f2Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f1Stats.count)}</span>
+                      <span className="w-1/3 text-center text-[9px] uppercase font-bold text-slate-500">Total Finos</span>
+                      <span className={`w-1/3 text-right font-black text-lg ${f2Stats.count > f1Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f2Stats.count)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ESTATÍSTICAS E RECORDES (RESTAURO) */}
+            {finosValidos.length > 0 && (
+              <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
+                <h2 className="font-bold text-lg mb-4 border-b pb-2 border-slate-800/50">📈 Curiosidades</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  
+                  <div>
+                    <h3 className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>Dias mais fortes</h3>
+                    <div className="space-y-1.5">
+                      {diasSemanaCount.map((count, i) => (
+                        <div key={i} className="flex items-center text-[9px]">
+                          <span className={`w-5 font-bold ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>{nomesDias[i]}</span>
+                          <div className={`flex-1 h-2.5 rounded-full ml-1 overflow-hidden ${isModoFesta ? 'bg-black' : darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
+                            <div className={`h-full rounded-full ${isModoFesta ? 'bg-fuchsia-500' : 'bg-amber-500'}`} style={{width: `${(count/maxDiaCount)*100}%`}}></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>Horas de Ponta</h3>
+                    <div className={`flex items-end h-28 gap-1.5 p-2 rounded-xl border ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      {Object.entries(horasCount).map(([label, count]) => {
+                        const isZero = count === 0;
+                        return (
+                          <div key={label} className="flex-1 flex flex-col items-center justify-end h-full">
+                            <span className={`text-[9px] font-bold mb-1 ${isZero ? '' : isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isZero ? '' : formatarFinos(count)}</span>
+                            <div className={`w-full rounded-t-sm transition-all ${isZero ? (isModoFesta ? 'bg-white/10' : 'bg-slate-800') : (isModoFesta ? 'bg-fuchsia-400' : 'bg-amber-400')}`} style={{height: isZero ? '2px' : `${(count/maxHoraCount)*100}%`, minHeight: '2px'}}></div>
+                            <span className={`text-[8px] mt-1 truncate w-full text-center ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>{label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
