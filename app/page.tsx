@@ -84,8 +84,19 @@ const SONS_CELEBRACAO = [
 ];
 
 // ==========================================
-// 🔔 FUNÇÕES DE NOTIFICAÇÃO PUSH
+// 🔔 AUXILIARES DE NOTIFICAÇÃO PUSH
 // ==========================================
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 async function enviarNotificacao(title: string, body: string) {
   try {
     await fetch('/api/push', {
@@ -107,15 +118,22 @@ async function ativarNotificacoesPush(perfilId: string) {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return false;
 
-  const registration = await navigator.serviceWorker.ready;
-  let subscription = await registration.pushManager.getSubscription();
+  const registration = await navigator.serviceWorker.register('/sw.js');
+  await navigator.serviceWorker.ready;
 
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFLDnG2tikGutjEDfa5xyg4bGaJZ2wftHDiRvY-bPzttKqhjWwsH9VN2MkVfpHDqwEt7i8AZnZqdnUDQPGZBR08'
-    });
+  const pubKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFLDnG2tikGutjEDfa5xyg4bGaJZ2wftHDiRvY-bPzttKqhjWwsH9VN2MkVfpHDqwEt7i8AZnZqdnUDQPGZBR08';
+  const applicationServerKey = urlBase64ToUint8Array(pubKey);
+
+  // Cancela a subscrição antiga para garantir que renova com a chave correta
+  let subscription = await registration.pushManager.getSubscription();
+  if (subscription) {
+    await subscription.unsubscribe();
   }
+
+  subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey
+  });
 
   await supabase.from('push_subscriptions').upsert([
     { perfil_id: perfilId, subscription }
@@ -205,6 +223,10 @@ export default function Home() {
 
     const themeGuardado = localStorage.getItem('finos_theme');
     if (themeGuardado === 'dark') setDarkMode(true);
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(console.error);
+    }
 
     // ⚡ CANAL EM TEMPO REAL (SUPABASE REALTIME)
     const canalRealtime = supabase
