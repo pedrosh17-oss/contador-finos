@@ -8,9 +8,9 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// Chaves VAPID genéricas para autenticação Push
-const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa16bg4SIn1L-O5jJ2p3R3jPz96yQ4M_Yh7k29QJpXm3k7xZ4Y4v3k';
-const privateKey = process.env.VAPID_PRIVATE_KEY || 'a3mQ9z_Y7k29QJpXm3k7xZ4Y4v3k8Y7k29QJpXm3k7x';
+// Chaves VAPID oficiais do projeto (com fallbacks corretos)
+const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFLDnG2tikGutjEDfa5xyg4bGaJZ2wftHDiRvY-bPzttKqhjWwsH9VN2MkVfpHDqwEt7i8AZnZqdnUDQPGZBR08';
+const privateKey = process.env.VAPID_PRIVATE_KEY || 'Ffn43KYGfSv1SQ0GPTlA4yAcTJ9TzscX26CrKeSCwkw';
 
 webpush.setVapidDetails(
   'mailto:grupo@contadorfinos.com',
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
           JSON.stringify({ title, body })
         );
       } catch (err) {
-        // Se a subscrição expirou, remove da BD
+        // Se a subscrição expirou ou falhou, remove da BD
         await supabase.from('push_subscriptions').delete().eq('id', item.id);
       }
     });
