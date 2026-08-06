@@ -1,6 +1,6 @@
 {
     "name": "Contador de Finos",
-    "short_name": "Contador de Finos",
+    "short_name": "Contador",
     "description": "Contador de Finos do Grupo",
     "start_url": "/",
     "display": "standalone",
