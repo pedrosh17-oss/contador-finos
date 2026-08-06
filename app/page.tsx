@@ -135,8 +135,9 @@ async function ativarNotificacoesPush(perfilId: string) {
     applicationServerKey
   });
 
+  // 🔴 AQUI ESTÁ A ÚNICA MUDANÇA (subscription.toJSON()):
   await supabase.from('push_subscriptions').upsert([
-    { perfil_id: perfilId, subscription }
+    { perfil_id: perfilId, subscription: subscription.toJSON() }
   ], { onConflict: 'perfil_id' });
 
   return true;
