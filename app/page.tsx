@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 // ==========================================
@@ -126,7 +126,6 @@ async function ativarNotificacoesPush(perfilId: string) {
   const pubKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BCYisANNmub1PBy-VT3OWqn33kZUFR6e74dtCi_xxNtMZV37EI12QDtxNUOHjQYQGlTAHGcTCTKVNW_IaAF5Znc';
   const applicationServerKey = urlBase64ToUint8Array(pubKey);
 
-  // Cancela a subscrição antiga para garantir que renova com a chave correta
   let subscription = await registration.pushManager.getSubscription();
   if (subscription) {
     await subscription.unsubscribe();
@@ -180,13 +179,32 @@ async function comprimirImagem(file: File, maxDimensao = 600, qualidade = 0.8): 
   });
 }
 
+// 📍 AUXILIAR PARA CAPTURAR COORDENADAS GPS
+async function obterLocalizacaoGPS(): Promise<{ lat: number | null; lng: number | null }> {
+  return new Promise((resolve) => {
+    if (!('geolocation' in navigator)) {
+      resolve({ lat: null, lng: null });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {
+        resolve({ lat: null, lng: null });
+      },
+      { timeout: 5000, enableHighAccuracy: true }
+    );
+  });
+}
+
 function formatarFinos(val: number): string {
   const num = Number(val) || 0;
   return num % 1 === 0 ? num.toString() : num.toFixed(1);
 }
 
 export default function Home() {
-  const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'rodada' | 'feitos' | 'historico'>('inicio');
+  const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'rodada' | 'mapa' | 'feitos' | 'historico'>('inicio');
   const [toast, setToast] = useState<{msg: string, tipo: 'erro' | 'sucesso'} | null>(null);
 
   const [modalGregorioOpen, setModalGregorioOpen] = useState(false);
@@ -220,6 +238,9 @@ export default function Home() {
   const [roletaRodadaId, setRoletaRodadaId] = useState<string | null>(null);
   const [vitimaRodada, setVitimaRodada] = useState<any | null>(null);
 
+  // REFERÊNCIA DO MAPA
+  const mapRef = useRef<any>(null);
+
   useEffect(() => {
     fetchDados();
 
@@ -230,22 +251,17 @@ export default function Home() {
       navigator.serviceWorker.register('/sw.js').catch(console.error);
     }
 
-    // ⚡ CANAL EM TEMPO REAL (SUPABASE REALTIME)
     const canalRealtime = supabase
       .channel('tempo-real-finos')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'finos' },
-        () => {
-          fetchDados();
-        }
+        () => { fetchDados(); }
       )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'perfis' },
-        () => {
-          fetchDados();
-        }
+        () => { fetchDados(); }
       )
       .subscribe();
 
@@ -253,6 +269,54 @@ export default function Home() {
       supabase.removeChannel(canalRealtime);
     };
   }, []);
+
+  // 🗺️ EFEITO DE CARREGAMENTO DO MAPA DE CALOR LEAFLET
+  useEffect(() => {
+    if (abaAtiva === 'mapa' && typeof window !== 'undefined') {
+      const L = (window as any).L;
+      if (!L) return;
+
+      // Destrói instância anterior se existir
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+
+      // Pontos com coordenadas válidas para o mapa de calor
+      const pontosCoordenadas = finos
+        .filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio')
+        .map(f => [Number(f.lat), Number(f.lng), (f.quantidade_equivalente ?? 1) * 0.5]);
+
+      // Centro padrão (Porto/Lisboa se não houver pontos)
+      const centroInicial = pontosCoordenadas.length > 0
+        ? [pontosCoordenadas[0][0], pontosCoordenadas[0][1]]
+        : [41.1579, -8.6291];
+
+      const map = L.map('mapa-calor-container').setView(centroInicial, 12);
+      mapRef.current = map;
+
+      // Camada de mapa estilo escuro / elegante
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 19
+      }).addTo(map);
+
+      // Renderiza mapa de calor se houver pontos
+      if (pontosCoordenadas.length > 0 && L.heatLayer) {
+        L.heatLayer(pontosCoordenadas, {
+          radius: 25,
+          blur: 15,
+          maxZoom: 17,
+          gradient: { 0.4: 'blue', 0.65: 'lime', 0.8: 'yellow', 1.0: 'red' }
+        }).addTo(map);
+
+        // Ajusta o zoom para enquadrar todos os pontos globais
+        const bounds = L.latLngBounds(pontosCoordenadas.map((p: any) => [p[0], p[1]]));
+        map.fitBounds(bounds, { padding: [30, 30] });
+      }
+    }
+  }, [abaAtiva, finos]);
 
   const handleAtivarNotificacoes = async () => {
     if (!selectedUser) {
@@ -297,7 +361,6 @@ export default function Home() {
         setDiasAbertos((prev) => ({ ...prev, [primeiroDia]: true }));
       }
       
-      // 🚨 VERIFICAR INATIVIDADE (CONAS DE SABÃO)
       dataPerfis?.forEach(p => {
         const pFinos = dataFinos.filter(f => f.perfil_id === p.id && f.tipo_bebida !== 'gregorio');
         if (pFinos.length > 0) {
@@ -409,7 +472,7 @@ export default function Home() {
     }
   }
 
-  // REGISTAR FINO INDIVIDUAL OU RODADA COMPLETA
+  // REGISTAR FINO INDIVIDUAL OU RODADA COMPLETA (COM GPS)
   async function registarFino(e: React.ChangeEvent<HTMLInputElement>) {
     if (!selectedUser) { mostrarToast('Seleciona o teu nome na lista primeiro! 🍺', 'erro'); return; }
     
@@ -422,6 +485,9 @@ export default function Home() {
       setLoading(true);
       const file = e.target.files?.[0];
       let photoUrl: string | null = null;
+
+      // 📍 APANHAR COORDENADAS GPS
+      const coords = await obterLocalizacaoGPS();
 
       if (file) {
         const fotoComprimida = await comprimirImagem(file);
@@ -439,7 +505,9 @@ export default function Home() {
           perfil_id: selectedUser, 
           foto_url: photoUrl,
           tipo_bebida: tipoBebidaSelecionado,
-          quantidade_equivalente: bebidaInfo.equivalencia
+          quantidade_equivalente: bebidaInfo.equivalencia,
+          lat: coords.lat,
+          lng: coords.lng
         }]);
       } else {
         const listaInserir = bebedoresRodada.map(pId => ({
@@ -447,13 +515,14 @@ export default function Home() {
           foto_url: photoUrl,
           tipo_bebida: tipoBebidaSelecionado,
           quantidade_equivalente: bebidaInfo.equivalencia,
-          pagador_id: selectedUser
+          pagador_id: selectedUser,
+          lat: coords.lat,
+          lng: coords.lng
         }));
 
         await supabase.from('finos').insert(listaInserir);
       }
       
-      // 🚨 REGRAS DE NOTIFICAÇÕES PUSH 🚨
       const nomeUser = perfis.find(p => p.id === selectedUser)?.nome || 'Alguém';
       const agoraHora = new Date().getHours();
 
@@ -461,7 +530,7 @@ export default function Home() {
          enviarNotificacao('💳 O CHEFE PAGOU UMA RODADA!', `${nomeUser} pagou uma rodada para ${bebedoresRodada.length} amigos! Paga o que deves!`);
       } else {
         if (agoraHora >= 3 && agoraHora < 6) {
-          enviarNotificacao('🎂 É PARABÉNS:', `${nomeUser} recusa-se a ir dormir e acabou de registar mais 1 bebida. Já passa das 3 da manhã…`);
+          enviarNotificacao('🎂 É PARABÉNS:', `${nomeUser} recusa-se a ir dormir e acabou de registar mais uma bebida. Já passa das 3 da manhã…`);
         } else {
           const finosHojeUser = (finosPorDataStr[hojeStrLocal] || []).filter(f => f.perfil_id === selectedUser).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0) + bebidaInfo.equivalencia;
           if (finosHojeUser >= 5) {
@@ -731,10 +800,12 @@ export default function Home() {
     return acc;
   }, {});
 
+  // 🗺️ ITEM DO MAPA ADICIONADO AO MENU
   const navItems = [
     { id: 'inicio', label: 'Início', icon: '🏠' },
     { id: 'ranking', label: 'Ranking', icon: '📊' },
     { id: 'rodada', label: 'Rodada', icon: '🎲' },
+    { id: 'mapa', label: 'Mapa', icon: '🗺️' },
     { id: 'feitos', label: 'Feitos', icon: '🎯' },
     { id: 'historico', label: 'Galeria', icon: '📸' }
   ] as const;
@@ -948,7 +1019,6 @@ export default function Home() {
               <label className={`block font-extrabold text-xs uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/70' : darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                 O que estão a beber?
               </label>
-              {/* ⚠️ Grelha alterada para 2 colunas para suportar 4 botões de forma bonita */}
               <div className="grid grid-cols-2 gap-2">
                 {(Object.keys(TIPOS_BEBIDA) as TipoBebidaKey[]).map((key) => {
                   const item = TIPOS_BEBIDA[key];
@@ -1184,7 +1254,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR NOVO: SORTEADOR DA PRÓXIMA RODADA */}
+        {/* SEPARADOR: SORTEADOR DA PRÓXIMA RODADA */}
         {abaAtiva === 'rodada' && (
           <div className="space-y-6">
             <div className={`p-5 rounded-2xl shadow border transition-colors ${cardClasses}`}>
@@ -1204,7 +1274,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* LISTA DE UTILIZADORES PARA MARCAR PRESENÇA */}
               <div className="grid grid-cols-2 gap-2 mb-6">
                 {perfis.map(p => {
                   const isPresente = presentesMesa.includes(p.id);
@@ -1229,7 +1298,6 @@ export default function Home() {
                 })}
               </div>
 
-              {/* BOTÃO DE SORTEAR */}
               <button
                 onClick={sortearQuemPaga}
                 disabled={isSorteandoRodada || presentesMesa.length < 2}
@@ -1244,7 +1312,6 @@ export default function Home() {
                 {isSorteandoRodada ? 'A rodar a roleta... 🍻' : '💸 QUEM PAGA A RODADA?'}
               </button>
 
-              {/* REVELAÇÃO DO RESULTADO COM BOTÃO DE FECHAR */}
               {vitimaRodada && (
                 <div className={`mt-6 p-5 rounded-2xl border text-center relative shadow-2xl animate-bounce ${
                   isModoFesta ? 'bg-red-600 border-yellow-400 text-white' : 'bg-amber-500 text-slate-950 border-amber-300'
@@ -1267,6 +1334,22 @@ export default function Home() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* 🗺️ SEPARADOR NOVO: MAPA DE CALOR MUNDIAL 🔥 */}
+        {abaAtiva === 'mapa' && (
+          <div className="space-y-6">
+            <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
+              <h2 className="font-bold text-lg mb-1 flex items-center gap-2">🔥 Mapa de Calor das Bebidas</h2>
+              <p className="text-xs text-slate-400 mb-4">
+                As zonas mais "quentes" no mapa representam onde o grupo mais fodeu as beiças aos finos!
+              </p>
+              
+              <div className="w-full h-96 rounded-2xl overflow-hidden border border-slate-700/50 shadow-inner relative z-10">
+                <div id="mapa-calor-container" className="w-full h-full"></div>
+              </div>
             </div>
           </div>
         )}

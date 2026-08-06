@@ -26,6 +26,14 @@ export default function RootLayout({
       <head>
         <link rel="icon" href="/logo.png" />
         <link rel="apple-touch-icon" href="/logo.png" />
+
+        {/* 🗺️ SCRIPTS DO MAPA DE CALOR (LEAFLET + HEATMAP) */}
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
       </head>
       <body>
         {children}
