@@ -113,7 +113,7 @@ async function ativarNotificacoesPush(perfilId: string) {
   if (!subscription) {
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BEl62iUYgUivxIkv69yViEuiBIa16bg4SIn1L-O5jJ2p3R3jPz96yQ4M_Yh7k29QJpXm3k7xZ4Y4v3k'
+      applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BFLDnG2tikGutjEDfa5xyg4bGaJZ2wftHDiRvY-bPzttKqhjWwsH9VN2MkVfpHDqwEt7i8AZnZqdnUDQPGZBR08'
     });
   }
 
