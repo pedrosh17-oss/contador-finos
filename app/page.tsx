@@ -4,10 +4,27 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 // ==========================================
-// ⚙️ CONFIGURAÇÃO RÁPIDA (MUDA AQUI!)
+// ⚙️ CONFIGURAÇÃO RÁPIDA
 // ==========================================
-const TOTAL_GIFS = 1;        // 👈 Põe aqui o número total de ficheiros .webp na pasta public/gifs/
-const META_FESTA_DIARIA = 20; // 🎯 Aos 20 finos diários arranca o caos!
+const TOTAL_GIFS = 1;                     // 👈 Número total de stickers em public/gifs/
+const META_FESTA_DIARIA = 20;              // 🎯 Aos 30 finos diários arranca o caos!
+const DATA_INICIO_PROJETO = '2026-08-05';   // 📅 Data oficial de arranque do contador
+
+// 🏷️ TITULOS OFICIAIS DO RANKING
+const TITULOS_RANKING = [
+  '👑 Campeão dos Finos',
+  '🐂 Matulão',
+  '⚠️ Atenção ao Bicho',
+  '🤝 "Se beberes também bebo"',
+  '🍻 Eu vou ao meu ritmo mas vou',
+  '😐 Nhé..',
+  '🤷‍♂️ Não é terrível, mas crl...',
+  '📉 Metade inferior. É curto...',
+  '🎈 Só bebes em festas?',
+  '🫣 Não fossem os outros eras uma vergonha',
+  '🧪 Tubo',
+  '🧼 Conas de sabão, faz-te homem!'
+];
 
 const TIPOS_BEBIDA = {
   fino: { label: '🍺 Fino / Mini', equivalencia: 1.0, emoji: '🍺' },
@@ -108,7 +125,7 @@ function formatarFinos(val: number): string {
 }
 
 export default function Home() {
-  const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'feitos' | 'historico'>('inicio');
+  const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'rodada' | 'feitos' | 'historico'>('inicio');
   const [toast, setToast] = useState<{msg: string, tipo: 'erro' | 'sucesso'} | null>(null);
 
   const [modalGregorioOpen, setModalGregorioOpen] = useState(false);
@@ -120,11 +137,14 @@ export default function Home() {
   const [novoNome, setNovoNome] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // MODO DE REGISTO EM INÍCIO: INDIVIDUAL OU RODADA
+  const [modoRegisto, setModoRegisto] = useState<'individual' | 'rodada'>('individual');
+  const [bebedoresRodada, setBebedoresRodada] = useState<string[]>([]);
+
   const [darkMode, setDarkMode] = useState(false);
   const [tipoBebidaSelecionado, setTipoBebidaSelecionado] = useState<TipoBebidaKey>('fino');
   
   const [abaRanking, setAbaRanking] = useState<'semanal' | 'geral'>('semanal');
-  
   const [mensagemModal, setMensagemModal] = useState<{ texto: string; gifUrl: string | null } | null>(null);
   
   const [fotoExpandida, setFotoExpandida] = useState<string | null>(null);
@@ -132,6 +152,12 @@ export default function Home() {
 
   const [fighter1, setFighter1] = useState<string>('');
   const [fighter2, setFighter2] = useState<string>('');
+
+  // SORTEADOR
+  const [presentesMesa, setPresentesMesa] = useState<string[]>([]);
+  const [isSorteandoRodada, setIsSorteandoRodada] = useState(false);
+  const [roletaRodadaId, setRoletaRodadaId] = useState<string | null>(null);
+  const [vitimaRodada, setVitimaRodada] = useState<any | null>(null);
 
   useEffect(() => {
     fetchDados();
@@ -184,39 +210,66 @@ export default function Home() {
 
   const finosValidos = finos.filter(f => f.tipo_bebida !== 'gregorio');
 
+  const hoje = new Date();
+  const hojeMs = new Date().setHours(0, 0, 0, 0);
+  const ontemMs = hojeMs - 86400000;
+
+  const dataArranque = new Date(DATA_INICIO_PROJETO + 'T00:00:00');
+  const diaDoProjeto = Math.max(1, Math.floor((hojeMs - dataArranque.getTime()) / 86400000) + 1);
+
+  const diasComFinosGrupo = Array.from(new Set(finosValidos.map(f => new Date(f.data_hora).setHours(0, 0, 0, 0)))).sort((a, b) => a - b);
+  let streakGrupo = 0;
+  if (diasComFinosGrupo.length > 0) {
+    let tempMs = hojeMs;
+    if (!diasComFinosGrupo.includes(tempMs)) {
+      tempMs = ontemMs;
+    }
+    while (diasComFinosGrupo.includes(tempMs)) {
+      streakGrupo++;
+      tempMs -= 86400000;
+    }
+  }
+
   const inicioSemana = new Date();
   const diaSemana = inicioSemana.getDay() || 7;
   inicioSemana.setHours(0, 0, 0, 0);
   inicioSemana.setDate(inicioSemana.getDate() - diaSemana + 1);
 
-  const finosExibidos = abaRanking === 'semanal' ? finosValidos.filter((f) => new Date(f.data_hora) >= inicioSemana) : finosValidos;
+  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+
+  const finosSemana = finosValidos.filter(f => new Date(f.data_hora) >= inicioSemana);
+  const contagemSemana: { [key: string]: number } = {};
+  finosSemana.forEach(f => {
+    contagemSemana[f.perfil_id] = (contagemSemana[f.perfil_id] || 0) + (f.quantidade_equivalente ?? 1);
+  });
+  let campeaoSemanaId = '';
+  let maxSemana = 0;
+  for (const [id, count] of Object.entries(contagemSemana)) {
+    if (count > maxSemana) { maxSemana = count; campeaoSemanaId = id; }
+  }
+
+  const finosMes = finosValidos.filter(f => new Date(f.data_hora) >= inicioMes);
+  const contagemMes: { [key: string]: number } = {};
+  finosMes.forEach(f => {
+    contagemMes[f.perfil_id] = (contagemMes[f.perfil_id] || 0) + (f.quantidade_equivalente ?? 1);
+  });
+  let campeaoMesId = '';
+  let maxMes = 0;
+  for (const [id, count] of Object.entries(contagemMes)) {
+    if (count > maxMes) { maxMes = count; campeaoMesId = id; }
+  }
+
+  const finosExibidos = abaRanking === 'semanal' ? finosSemana : finosValidos;
   const totalFinosEq = finosExibidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
   const totalFinosGeralEq = finosValidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
   const proximoMarco = MARCOS_GRUPO.find(m => m.meta > totalFinosGeralEq);
 
-  let maxFinosDay = { dataPt: '-', total: 0, topUsers: [] as string[], topCount: 0 };
   const finosPorDataStr: { [key: string]: any[] } = {};
   finosValidos.forEach(f => {
     const dStr = new Date(f.data_hora).toLocaleDateString('pt-PT');
     if (!finosPorDataStr[dStr]) finosPorDataStr[dStr] = [];
     finosPorDataStr[dStr].push(f);
   });
-  for (const [dataPt, lista] of Object.entries(finosPorDataStr)) {
-    const totalDia = lista.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
-    if (totalDia > maxFinosDay.total) {
-      const contagemDia: { [key: string]: number } = {};
-      lista.forEach(f => {
-        const nome = f.perfis?.nome || 'Desconhecido';
-        contagemDia[nome] = (contagemDia[nome] || 0) + (f.quantidade_equivalente ?? 1);
-      });
-      let dayMax = 0, topNames: string[] = [];
-      for (const [n, c] of Object.entries(contagemDia)) {
-        if (c > dayMax) { dayMax = c; topNames = [n]; }
-        else if (c === dayMax) topNames.push(n);
-      }
-      maxFinosDay = { dataPt, total: totalDia, topUsers: topNames, topCount: dayMax };
-    }
-  }
 
   const hojeStrLocal = new Date().toLocaleDateString('pt-PT');
   const finosBebidosHoje = (finosPorDataStr[hojeStrLocal] || []).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
@@ -245,8 +298,15 @@ export default function Home() {
     }
   }
 
+  // REGISTAR FINO INDIVIDUAL OU RODADA COMPLETA
   async function registarFino(e: React.ChangeEvent<HTMLInputElement>) {
     if (!selectedUser) { mostrarToast('Seleciona o teu nome na lista primeiro! 🍺', 'erro'); return; }
+    
+    if (modoRegisto === 'rodada' && bebedoresRodada.length === 0) {
+      mostrarToast('Seleciona pelo menos 1 amigo que bebeu na rodada!', 'erro');
+      return;
+    }
+
     try {
       setLoading(true);
       const file = e.target.files?.[0];
@@ -263,31 +323,50 @@ export default function Home() {
 
       const bebidaInfo = TIPOS_BEBIDA[tipoBebidaSelecionado];
 
-      await supabase.from('finos').insert([{ 
-        perfil_id: selectedUser, 
-        foto_url: photoUrl,
-        tipo_bebida: tipoBebidaSelecionado,
-        quantidade_equivalente: bebidaInfo.equivalencia
-      }]);
+      if (modoRegisto === 'individual') {
+        // REGISTO INDIVIDUAL
+        await supabase.from('finos').insert([{ 
+          perfil_id: selectedUser, 
+          foto_url: photoUrl,
+          tipo_bebida: tipoBebidaSelecionado,
+          quantidade_equivalente: bebidaInfo.equivalencia
+        }]);
+      } else {
+        // REGISTO DE RODADA (PARTILHA A MESMA FOTO PARA TODOS OS PARTICIPANTES)
+        const listaInserir = bebedoresRodada.map(pId => ({
+          perfil_id: pId,
+          foto_url: photoUrl,
+          tipo_bebida: tipoBebidaSelecionado,
+          quantidade_equivalente: bebidaInfo.equivalencia,
+          pagador_id: selectedUser // Guarda quem pagou a rodada!
+        }));
+
+        await supabase.from('finos').insert(listaInserir);
+      }
       
       dispararCelebracao();
       
       const frasesRandom = isModoFesta ? MENSAGENS_FESTA : MENSAGENS_DIVERTIDAS;
       const textoSorteado = frasesRandom[Math.floor(Math.random() * frasesRandom.length)];
       
-      // SORTEIO NUMÉRICO ALEATÓRIO DE 1 ATÉ TOTAL_GIFS
       let gifSorteado: string | null = null;
       if (TOTAL_GIFS > 0) {
         const numRandom = Math.floor(Math.random() * TOTAL_GIFS) + 1;
         gifSorteado = `/gifs/${numRandom}.webp`;
       }
 
-      setMensagemModal({ texto: textoSorteado, gifUrl: gifSorteado });
-      
+      setMensagemModal({ 
+        texto: modoRegisto === 'rodada' 
+          ? `💳 Rodada registada! Pagante: ${perfis.find(p=>p.id===selectedUser)?.nome}` 
+          : textoSorteado, 
+        gifUrl: gifSorteado 
+      });
+
+      setBebedoresRodada([]);
       fetchDados();
     } catch (err) {
       console.error(err);
-      mostrarToast('Erro ao guardar o fino. Verifica a net.', 'erro');
+      mostrarToast('Erro ao guardar. Verifica a net.', 'erro');
     } finally {
       setLoading(false);
     }
@@ -316,8 +395,28 @@ export default function Home() {
     setModalGregorioOpen(true);
   }
 
-  function calcularConquistas(userFinosValidos: any[]) {
+  // CÁLCULO DE CRACHÁS/MEDALHAS
+  function calcularConquistas(userFinosValidos: any[], userId: string) {
     const list: string[] = [];
+    
+    // CRACHÁS TEMPORAIS DE CAMPEÃO
+    if (userId === campeaoSemanaId && maxSemana > 0) list.push('👑 Campeão da Semana');
+    if (userId === campeaoMesId && maxMes > 0) list.push('🏆 Campeão do Mês');
+
+    // CRACHÁ: 💸 PAGA-RODADAS (Quantas rodadas pagou no total)
+    const rodadasPagas = finos.filter(f => f.pagador_id === userId).length;
+    if (rodadasPagas > 0) {
+      const rodadasUnicas = new Set(finos.filter(f => f.pagador_id === userId).map(f => f.data_hora)).size;
+      list.push(`💸 Paga-Rodadas (${rodadasUnicas}x)`);
+    }
+
+    // CRACHÁ: 🌵 DESERTO (Não bebeu nenhum fino na última semana)
+    const umaSemanaAtrasMs = Date.now() - 7 * 86400000;
+    const bebeuNaUltimaSemana = userFinosValidos.some(f => new Date(f.data_hora).getTime() >= umaSemanaAtrasMs);
+    if (!bebeuNaUltimaSemana && userFinosValidos.length > 0) {
+      list.push('🌵 Deserto');
+    }
+
     if (!userFinosValidos || userFinosValidos.length === 0) return list;
     if (userFinosValidos.some((f) => { const h = new Date(f.data_hora).getHours(); return h >= 6 && h < 13; })) list.push('🌅 Madrugador');
     if (userFinosValidos.some((f) => { const h = new Date(f.data_hora).getHours(); return h >= 3 && h < 6; })) list.push('🦉 Coruja');
@@ -349,7 +448,7 @@ export default function Home() {
       
       const count = userFinosFiltrados.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
       const gregorios = userFinosGeral.filter(f => f.tipo_bebida === 'gregorio').length;
-      const conquistas = calcularConquistas(userFinosValidos);
+      const conquistas = calcularConquistas(userFinosValidos, p.id);
 
       const periodos = { 'Madrugada': 0, 'Manhã': 0, 'Tarde': 0, 'Noite': 0 };
       userFinosValidos.forEach(f => {
@@ -374,8 +473,6 @@ export default function Home() {
   const reiDoFino = contagemPorPessoa[0];
   const media = perfis.length > 0 ? (totalFinosEq / perfis.length).toFixed(1) : '0';
 
-  const hojeMs = new Date().setHours(0, 0, 0, 0);
-  const ontemMs = hojeMs - 86400000;
   const statsStreaks = perfis.map(p => {
     const pFinos = finosValidos.filter(f => f.perfil_id === p.id);
     const diasUnicosMs = Array.from(new Set(pFinos.map(f => new Date(f.data_hora).setHours(0, 0, 0, 0)))).sort((a, b) => a - b);
@@ -443,6 +540,49 @@ export default function Home() {
   const f1Stats = fighter1 ? getFighterStats(fighter1) : null;
   const f2Stats = fighter2 ? getFighterStats(fighter2) : null;
 
+  // LÓGICA DO SORTEADOR DA RODADA
+  const toggleMesa = (id: string) => {
+    setPresentesMesa(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]);
+  };
+
+  const toggleBebedorRodada = (id: string) => {
+    setBebedoresRodada(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]);
+  };
+
+  const selecionarTodosMesa = () => setPresentesMesa(perfis.map(p => p.id));
+  const limparMesa = () => setPresentesMesa([]);
+
+  function sortearQuemPaga() {
+    if (presentesMesa.length < 2) {
+      mostrarToast('Seleciona pelo menos 2 pessoas na mesa! 🍻', 'erro');
+      return;
+    }
+    setIsSorteandoRodada(true);
+    setVitimaRodada(null);
+    
+    let voltas = 0;
+    const maxVoltas = 15 + Math.floor(Math.random() * 10);
+    let currentIdx = 0;
+
+    const tick = () => {
+      const idAtual = presentesMesa[currentIdx];
+      setRoletaRodadaId(idAtual);
+      voltas++;
+
+      if (voltas < maxVoltas) {
+        currentIdx = (currentIdx + 1) % presentesMesa.length;
+        const delay = 50 + (voltas * voltas * 0.8);
+        setTimeout(tick, delay);
+      } else {
+        const perfilSorteado = perfis.find(p => p.id === idAtual);
+        setVitimaRodada(perfilSorteado);
+        setIsSorteandoRodada(false);
+        dispararCelebracao();
+      }
+    };
+    tick();
+  }
+
   const toggleDia = (dia: string) => setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
   const finosPorDiaParaLista = finos.reduce((acc: { [key: string]: any[] }, fino) => {
     const dataStr = new Date(fino.data_hora).toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -454,6 +594,7 @@ export default function Home() {
   const navItems = [
     { id: 'inicio', label: 'Início', icon: '🏠' },
     { id: 'ranking', label: 'Ranking', icon: '📊' },
+    { id: 'rodada', label: 'Rodada', icon: '🎲' },
     { id: 'feitos', label: 'Feitos', icon: '🎯' },
     { id: 'historico', label: 'Galeria', icon: '📸' }
   ] as const;
@@ -543,6 +684,25 @@ export default function Home() {
         {/* SEPARADOR 1: INÍCIO */}
         {abaAtiva === 'inicio' && (
           <div className="space-y-6">
+            
+            {/* CONTAGEM DE DIAS DO PROJETO + STREAK DO GRUPO */}
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 ${cardClasses}`}>
+                <span className="text-xl">📅</span>
+                <div className="text-left">
+                  <p className="text-[9px] uppercase font-bold text-slate-400 leading-none">Tempo de jogo</p>
+                  <p className="text-sm font-black text-amber-500 mt-0.5">Dia {diaDoProjeto}</p>
+                </div>
+              </div>
+              <div className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 ${cardClasses}`}>
+                <span className="text-xl">🔥</span>
+                <div className="text-left">
+                  <p className="text-[9px] uppercase font-bold text-slate-400 leading-none">Streak Grupo</p>
+                  <p className="text-sm font-black text-orange-500 mt-0.5">{streakGrupo} {streakGrupo === 1 ? 'Dia' : 'Dias'}</p>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className={`p-4 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
                 <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Total do Grupo</p>
@@ -556,18 +716,74 @@ export default function Home() {
               </div>
             </div>
 
+            {/* SELETOR DE MODO: INDIVIDUAL OU REGISTAR RODADA */}
+            <div className={`p-1.5 rounded-2xl border flex gap-1 ${cardClasses}`}>
+              <button
+                onClick={() => setModoRegisto('individual')}
+                className={`flex-1 py-2.5 rounded-xl font-black text-xs transition ${
+                  modoRegisto === 'individual'
+                    ? (isModoFesta ? 'bg-white text-black' : 'bg-amber-500 text-slate-950')
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                🍺 Fino Individual
+              </button>
+              <button
+                onClick={() => setModoRegisto('rodada')}
+                className={`flex-1 py-2.5 rounded-xl font-black text-xs transition ${
+                  modoRegisto === 'rodada'
+                    ? (isModoFesta ? 'bg-white text-black' : 'bg-amber-500 text-slate-950')
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                💳 Pagar Rodada
+              </button>
+            </div>
+
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
-              <label className={`block font-bold mb-2 text-sm ${isModoFesta ? 'text-white' : darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Quem és tu?</label>
+              <label className={`block font-bold mb-2 text-sm ${isModoFesta ? 'text-white' : darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                {modoRegisto === 'rodada' ? 'Quem vai PAGAR a rodada? 💳' : 'Quem és tu?'}
+              </label>
               <select
                 className={`w-full p-2.5 border rounded-xl font-bold mb-3 outline-none text-sm ${
                   isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
                 }`}
                 value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}
               >
-                <option value="">-- Seleciona o teu nome --</option>
+                <option value="">-- Seleciona o pagador --</option>
                 {perfis.map((p) => (<option key={p.id} value={p.id}>{p.nome}</option>))}
               </select>
-              <div className="flex gap-2">
+
+              {/* SE MODO RODADA ATIVO: MARCAR AMIGOS QUE BEBERAM */}
+              {modoRegisto === 'rodada' && (
+                <div className="mt-3 pt-3 border-t border-slate-800/50">
+                  <label className="block font-extrabold text-xs uppercase tracking-wider mb-2 text-amber-500">
+                    Quem BEBEU na rodada? ({bebedoresRodada.length})
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                    {perfis.map(p => {
+                      const isSelected = bebedoresRodada.includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => toggleBebedorRodada(p.id)}
+                          className={`p-2 rounded-lg border font-bold text-[11px] text-left transition flex justify-between items-center ${
+                            isSelected 
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-400' 
+                              : 'bg-black/20 border-slate-800 text-slate-500'
+                          }`}
+                        >
+                          <span className="truncate">{p.nome}</span>
+                          <span>{isSelected ? '✅' : '⚪'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-3">
                 <input 
                   type="text" placeholder="Novo amigo..." 
                   className={`flex-1 p-2 border rounded-xl text-sm outline-none font-bold ${
@@ -581,7 +797,7 @@ export default function Home() {
 
             <div>
               <label className={`block font-extrabold text-xs uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/70' : darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                O que estás a beber?
+                O que estão a beber?
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {(Object.keys(TIPOS_BEBIDA) as TipoBebidaKey[]).map((key) => {
@@ -615,9 +831,11 @@ export default function Home() {
               }`}>
                 {loading 
                   ? 'A guardar... 🍺' 
-                  : isModoFesta 
-                    ? 'MANDA VIR CRL! 🚀' 
-                    : `${TIPOS_BEBIDA[tipoBebidaSelecionado].emoji} +1 ${tipoBebidaSelecionado.toUpperCase()}`
+                  : modoRegisto === 'rodada'
+                    ? '💳 CONFIRMAR RODADA PAGA!'
+                    : isModoFesta 
+                      ? 'MANDA VIR CRL! 🚀' 
+                      : `${TIPOS_BEBIDA[tipoBebidaSelecionado].emoji} +1 ${tipoBebidaSelecionado.toUpperCase()}`
                 }
                 <input type="file" accept="image/*" capture="environment" className="hidden" disabled={!selectedUser || loading} onChange={registarFino} />
               </label>
@@ -643,7 +861,6 @@ export default function Home() {
         {abaAtiva === 'ranking' && (
           <div className="space-y-6">
             
-            {/* TABELA GERAL */}
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <div className="flex justify-between items-center mb-3 border-b pb-2 border-slate-800/50">
                 <h2 className="font-bold text-lg flex items-center gap-2">📊 Tabela Geral</h2>
@@ -655,10 +872,7 @@ export default function Home() {
               
               <div className="space-y-2">
                 {contagemPorPessoa.map((p, idx) => {
-                  let statusBadge = '';
-                  if (p.count > 0 && p.count === maxFinos) statusBadge = '🍾 Bêbedo';
-                  else if (Number(p.count) < Number(media) * 0.5) statusBadge = '🕺 conas';
-                  else statusBadge = '🍺 A acompanhar';
+                  const statusBadge = TITULOS_RANKING[idx] || TITULOS_RANKING[TITULOS_RANKING.length - 1];
                   
                   const userCurrentStreak = statsStreaks.find(s => s.id === p.id)?.currentStreak || 0;
                   const estaExpandido = !!usersExpandidos[p.id];
@@ -672,11 +886,11 @@ export default function Home() {
                       }`}
                     >
                       <div className="flex justify-between items-center text-sm">
-                        <div>
+                        <div className="truncate pr-2">
                           <span className="font-bold">{idx + 1}. {p.nome}</span>
-                          <span className="text-xs text-slate-500 font-normal ml-2">{statusBadge}</span>
+                          <span className="text-[10px] text-amber-500 font-semibold block mt-0.5">{statusBadge}</span>
                         </div>
-                        <div className="text-right flex items-center gap-2">
+                        <div className="text-right flex items-center gap-2 shrink-0">
                           <span className={`font-black px-3 py-1 rounded-full text-xs border ${isModoFesta ? 'bg-white/20 text-white border-white/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
                             {formatarFinos(p.count)} finos
                           </span>
@@ -684,7 +898,7 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {/* CRACHÁS SEMPRE VISÍVEIS */}
+                      {/* CRACHÁS */}
                       {(p.conquistas.length > 0 || userCurrentStreak > 1 || p.gregorios > 0 || p.periodoForte) && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {p.gregorios > 0 && (
@@ -703,7 +917,15 @@ export default function Home() {
                             </span>
                           )}
                           {p.conquistas.map((badgeText: string, i: number) => (
-                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${isModoFesta ? 'bg-white/10 text-white border-white/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${
+                              badgeText.includes('🌵')
+                                ? 'bg-yellow-900/30 text-yellow-500 border-yellow-700/50'
+                                : badgeText.includes('💸')
+                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black'
+                                  : badgeText.includes('👑') || badgeText.includes('🏆') 
+                                    ? 'bg-amber-500 text-black border-amber-300 font-black shadow-sm' 
+                                    : isModoFesta ? 'bg-white/10 text-white border-white/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            }`}>
                               {badgeText}
                             </span>
                           ))}
@@ -725,6 +947,11 @@ export default function Home() {
                                       <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[8px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm tracking-wide">
                                         {new Date(f.data_hora).toLocaleDateString('pt-PT', {day:'2-digit', month:'2-digit', year:'2-digit'})} {new Date(f.data_hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
                                       </div>
+                                      {f.pagador_id && (
+                                        <div className="absolute top-1 left-1 bg-emerald-600/90 text-white text-[7px] px-1 py-0.5 rounded font-black backdrop-blur-sm">
+                                          💳 Rodada Paga
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -807,7 +1034,94 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR 3: GRANDES FEITOS */}
+        {/* SEPARADOR NOVO: SORTEADOR DA PRÓXIMA RODADA */}
+        {abaAtiva === 'rodada' && (
+          <div className="space-y-6">
+            <div className={`p-5 rounded-2xl shadow border transition-colors ${cardClasses}`}>
+              <h2 className="font-black text-xl mb-1 flex items-center gap-2">🎲 Sorteador da Rodada</h2>
+              <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                Seleciona quem está presente na mesa para sortear quem paga a próxima rodada de finos!
+              </p>
+
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">
+                  Quem está na mesa? ({presentesMesa.length})
+                </span>
+                <div className="flex gap-2 text-[10px] font-bold">
+                  <button onClick={selecionarTodosMesa} className="text-amber-500 hover:underline">Todos</button>
+                  <span className="text-slate-600">|</span>
+                  <button onClick={limparMesa} className="text-slate-400 hover:underline">Limpar</button>
+                </div>
+              </div>
+
+              {/* LISTA DE UTILIZADORES PARA MARCAR PRESENÇA */}
+              <div className="grid grid-cols-2 gap-2 mb-6">
+                {perfis.map(p => {
+                  const isPresente = presentesMesa.includes(p.id);
+                  const isOnRoleta = roletaRodadaId === p.id;
+
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => toggleMesa(p.id)}
+                      className={`p-3 rounded-xl border font-bold text-xs transition flex items-center justify-between ${
+                        isOnRoleta
+                          ? 'bg-amber-500 text-black border-amber-300 scale-105 shadow-lg'
+                          : isPresente
+                            ? (isModoFesta ? 'bg-white/20 border-white/40 text-white' : 'bg-amber-500/10 border-amber-500/40 text-amber-400')
+                            : (isModoFesta ? 'bg-black/40 border-white/5 text-white/40' : darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-600' : 'bg-slate-100 border-slate-200 text-slate-400')
+                      }`}
+                    >
+                      <span className="truncate">{p.nome}</span>
+                      <span>{isPresente ? '✅' : '⚪'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* BOTÃO DE SORTEAR */}
+              <button
+                onClick={sortearQuemPaga}
+                disabled={isSorteandoRodada || presentesMesa.length < 2}
+                className={`w-full py-4 rounded-xl font-black text-lg shadow-xl transition transform active:scale-95 ${
+                  isSorteandoRodada 
+                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                    : presentesMesa.length >= 2
+                      ? (isModoFesta ? 'bg-gradient-to-r from-red-600 via-pink-600 to-purple-600 text-white border-2 border-yellow-400' : 'bg-amber-500 hover:bg-amber-400 text-slate-950')
+                      : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                }`}
+              >
+                {isSorteandoRodada ? 'A rodar a roleta... 🍻' : '💸 QUEM PAGA A RODADA?'}
+              </button>
+
+              {/* REVELAÇÃO DO RESULTADO COM BOTÃO DE FECHAR */}
+              {vitimaRodada && (
+                <div className={`mt-6 p-5 rounded-2xl border text-center relative shadow-2xl animate-bounce ${
+                  isModoFesta ? 'bg-red-600 border-yellow-400 text-white' : 'bg-amber-500 text-slate-950 border-amber-300'
+                }`}>
+                  <button 
+                    onClick={() => setVitimaRodada(null)}
+                    className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-black/20 hover:bg-black/40 font-black text-xs flex items-center justify-center transition"
+                    title="Fechar resultado"
+                  >
+                    ✕
+                  </button>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Parabéns!</p>
+                  <h3 className="text-2xl font-black mt-1">🍻 {vitimaRodada.nome} PAGA A RODADA!</h3>
+                  <p className="text-xs font-semibold mt-1 opacity-90">Oupas! 🍻</p>
+                  <button
+                    onClick={() => setVitimaRodada(null)}
+                    className="mt-3 px-4 py-1.5 rounded-lg bg-black/20 hover:bg-black/30 font-black text-xs transition"
+                  >
+                    OK / Fechar
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* SEPARADOR 4: GRANDES FEITOS */}
         {abaAtiva === 'feitos' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
@@ -850,7 +1164,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR 4: HISTÓRICO E GALERIA */}
+        {/* SEPARADOR 5: HISTÓRICO E GALERIA */}
         {abaAtiva === 'historico' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
@@ -883,6 +1197,11 @@ export default function Home() {
                                       {emojiBebida} <strong className={isModoFesta ? 'text-white' : darkMode ? 'text-slate-200' : 'text-slate-800'}>{f.perfis?.nome || 'Desconhecido'}</strong>
                                       {!isGregorio && <span className="text-[10px] ml-1 opacity-70">({f.quantidade_equivalente ?? 1}x)</span>}
                                       {isGregorio && <span className="text-[10px] ml-1 text-red-400 font-bold opacity-90">(Vomitou)</span>}
+                                      {f.pagador_id && (
+                                        <span className="text-[9px] ml-1 text-emerald-400 font-bold">
+                                          (💳 Paga por {perfis.find(p=>p.id===f.pagador_id)?.nome})
+                                        </span>
+                                      )}
                                     </span>
                                     <span className="text-slate-500">{new Date(f.data_hora).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                   </div>
@@ -903,7 +1222,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* MENU INFERIOR */}
+        {/* MENU INFERIOR NAVEGAÇÃO */}
         <nav className={`fixed bottom-0 left-0 right-0 max-w-md mx-auto border-t z-40 transition-colors ${
           isModoFesta ? 'bg-black/90 border-white/10' : darkMode ? 'bg-slate-950/90 border-slate-800' : 'bg-white/95 border-slate-200'
         } backdrop-blur-md pb-safe`}>
@@ -921,7 +1240,7 @@ export default function Home() {
                     }`}
                   >
                     <span className={`text-xl mb-1 ${isActive ? 'scale-110' : 'scale-100'} transition-transform duration-200`}>{item.icon}</span>
-                    <span className={`text-[10px] font-bold ${isActive ? 'opacity-100' : 'opacity-70'}`}>{item.label}</span>
+                    <span className={`text-[9px] font-bold ${isActive ? 'opacity-100' : 'opacity-70'}`}>{item.label}</span>
                   </button>
                 </li>
               );
@@ -957,7 +1276,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* MODAL CELEBRAÇÃO (TEXTO + STICKER WEBP NUMÉRICO) */}
+        {/* MODAL CELEBRAÇÃO */}
         {mensagemModal && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
             <div className={`rounded-3xl p-5 text-center max-w-xs w-full shadow-2xl transform transition-all border overflow-hidden ${
@@ -966,7 +1285,6 @@ export default function Home() {
               <div className="text-3xl mb-1">{TIPOS_BEBIDA[tipoBebidaSelecionado].emoji}</div>
               <h3 className={`font-black text-lg mb-1 ${isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isModoFesta ? 'BOOOM!!! 🚀' : 'Registado!'}</h3>
               
-              {/* STICKER WEBP CARREGADO POR NÚMERO */}
               {mensagemModal.gifUrl && (
                 <div className="my-3 rounded-2xl overflow-hidden shadow-md max-h-48 border border-slate-700/30 flex items-center justify-center bg-black/20">
                   <img src={mensagemModal.gifUrl} alt="Sticker do grupo" className="w-full h-full object-cover max-h-48" />
