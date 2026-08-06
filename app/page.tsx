@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 // ==========================================
-// CONFIGURAÇÕES GERAIS E MODO FESTA
+// ⚙️ CONFIGURAÇÃO RÁPIDA (MUDA AQUI!)
 // ==========================================
+const TOTAL_GIFS = 1;        // 👈 Põe aqui o número total de ficheiros .webp na pasta public/gifs/
 const META_FESTA_DIARIA = 20; // 🎯 Aos 20 finos diários arranca o caos!
 
 const TIPOS_BEBIDA = {
@@ -123,7 +124,9 @@ export default function Home() {
   const [tipoBebidaSelecionado, setTipoBebidaSelecionado] = useState<TipoBebidaKey>('fino');
   
   const [abaRanking, setAbaRanking] = useState<'semanal' | 'geral'>('semanal');
-  const [mensagemModal, setMensagemModal] = useState<string | null>(null);
+  
+  const [mensagemModal, setMensagemModal] = useState<{ texto: string; gifUrl: string | null } | null>(null);
+  
   const [fotoExpandida, setFotoExpandida] = useState<string | null>(null);
   const [diasAbertos, setDiasAbertos] = useState<{ [key: string]: boolean }>({});
 
@@ -270,7 +273,16 @@ export default function Home() {
       dispararCelebracao();
       
       const frasesRandom = isModoFesta ? MENSAGENS_FESTA : MENSAGENS_DIVERTIDAS;
-      setMensagemModal(frasesRandom[Math.floor(Math.random() * frasesRandom.length)]);
+      const textoSorteado = frasesRandom[Math.floor(Math.random() * frasesRandom.length)];
+      
+      // SORTEIO NUMÉRICO ALEATÓRIO DE 1 ATÉ TOTAL_GIFS
+      let gifSorteado: string | null = null;
+      if (TOTAL_GIFS > 0) {
+        const numRandom = Math.floor(Math.random() * TOTAL_GIFS) + 1;
+        gifSorteado = `/gifs/${numRandom}.webp`;
+      }
+
+      setMensagemModal({ texto: textoSorteado, gifUrl: gifSorteado });
       
       fetchDados();
     } catch (err) {
@@ -339,7 +351,6 @@ export default function Home() {
       const gregorios = userFinosGeral.filter(f => f.tipo_bebida === 'gregorio').length;
       const conquistas = calcularConquistas(userFinosValidos);
 
-      // NOVO: CALCULAR O PERÍODO DE PICO DO UTILIZADOR
       const periodos = { 'Madrugada': 0, 'Manhã': 0, 'Tarde': 0, 'Noite': 0 };
       userFinosValidos.forEach(f => {
         const h = new Date(f.data_hora).getHours();
@@ -673,7 +684,7 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {/* CRACHÁS SEMPRE VISÍVEIS MESMO ANTES DE ABRIR */}
+                      {/* CRACHÁS SEMPRE VISÍVEIS */}
                       {(p.conquistas.length > 0 || userCurrentStreak > 1 || p.gregorios > 0 || p.periodoForte) && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {p.gregorios > 0 && (
@@ -711,7 +722,6 @@ export default function Home() {
                                   {fotosUser.map(f => (
                                     <div key={f.id} className="relative group cursor-pointer" onClick={() => setFotoExpandida(f.foto_url)}>
                                       <img src={f.foto_url} loading="lazy" className="w-full h-28 object-cover rounded-lg shadow-sm hover:opacity-90 transition" alt="Fino"/>
-                                      {/* DATA E HORA NA FOTO */}
                                       <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[8px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm tracking-wide">
                                         {new Date(f.data_hora).toLocaleDateString('pt-PT', {day:'2-digit', month:'2-digit', year:'2-digit'})} {new Date(f.data_hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
                                       </div>
@@ -729,7 +739,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* FRENTE A FRENTE 1V1 (RESTAURO) */}
+            {/* FRENTE A FRENTE 1V1 */}
             {perfis.length >= 2 && finosValidos.length > 0 && (
               <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
                 <h2 className="font-bold text-lg mb-3 border-b pb-2 border-slate-800/50 flex items-center gap-2">⚔️ Frente-a-Frente</h2>
@@ -754,7 +764,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* ESTATÍSTICAS E RECORDES (RESTAURO) */}
+            {/* ESTATÍSTICAS E RECORDES */}
             {finosValidos.length > 0 && (
               <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
                 <h2 className="font-bold text-lg mb-4 border-b pb-2 border-slate-800/50">📈 Curiosidades</h2>
@@ -947,13 +957,23 @@ export default function Home() {
           </div>
         )}
 
-        {/* MODAL CELEBRAÇÃO */}
+        {/* MODAL CELEBRAÇÃO (TEXTO + STICKER WEBP NUMÉRICO) */}
         {mensagemModal && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-            <div className={`rounded-3xl p-6 text-center max-w-xs shadow-2xl transform transition-all border ${isModoFesta ? 'bg-black border-white text-white shadow-[0_0_50px_rgba(255,255,255,0.8)]' : darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-900'}`}>
-              <div className="text-4xl mb-2">{TIPOS_BEBIDA[tipoBebidaSelecionado].emoji}</div>
-              <h3 className={`font-black text-lg mb-2 ${isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isModoFesta ? 'BOOOM!!! 🚀' : 'Registado!'}</h3>
-              <p className="text-sm font-semibold mb-6 text-slate-400">{mensagemModal}</p>
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+            <div className={`rounded-3xl p-5 text-center max-w-xs w-full shadow-2xl transform transition-all border overflow-hidden ${
+              isModoFesta ? 'bg-black border-white text-white shadow-[0_0_50px_rgba(255,255,255,0.8)]' : darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-900'
+            }`}>
+              <div className="text-3xl mb-1">{TIPOS_BEBIDA[tipoBebidaSelecionado].emoji}</div>
+              <h3 className={`font-black text-lg mb-1 ${isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isModoFesta ? 'BOOOM!!! 🚀' : 'Registado!'}</h3>
+              
+              {/* STICKER WEBP CARREGADO POR NÚMERO */}
+              {mensagemModal.gifUrl && (
+                <div className="my-3 rounded-2xl overflow-hidden shadow-md max-h-48 border border-slate-700/30 flex items-center justify-center bg-black/20">
+                  <img src={mensagemModal.gifUrl} alt="Sticker do grupo" className="w-full h-full object-cover max-h-48" />
+                </div>
+              )}
+
+              <p className="text-xs font-semibold mb-4 text-slate-400">{mensagemModal.texto}</p>
               <button onClick={() => setMensagemModal(null)} className={`w-full font-black py-3 rounded-xl shadow transition active:scale-95 ${isModoFesta ? 'bg-white text-black' : 'bg-amber-500 hover:bg-amber-400 text-slate-950'}`}>Siga fiii! 🍻</button>
             </div>
           </div>
