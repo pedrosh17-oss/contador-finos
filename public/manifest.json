@@ -1,8 +1,8 @@
 {
     "name": "Contador de Finos",
-    "short_name": "Finos",
+    "short_name": "Finos App",
     "description": "Contador de Finos do Grupo",
-    "start_url": "/",
+    "start_url": "/?v=2",
     "display": "standalone",
     "background_color": "#020617",
     "theme_color": "#f59e0b",
