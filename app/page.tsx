@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 // ⚙️ CONFIGURAÇÃO RÁPIDA
 // ==========================================
 const TOTAL_GIFS = 1;                     
-const META_FESTA_DIARIA = 20;              
+const META_FESTA_DIARIA = 20;             
 const DATA_INICIO_PROJETO = '2026-08-05';   
 
 // 🏷️ TÍTULOS OFICIAIS DO RANKING
@@ -90,7 +90,7 @@ const SONS_CELEBRACAO = [
   'https://assets.mixkit.co/active_storage/sfx/2070/2070-preview.mp3', 
   'https://assets.mixkit.co/active_storage/sfx/2000/2000-preview.mp3', 
   'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3', 
-  'https://assets.mixkit.co/active_storage/sfx/131.mp3',                
+  'https://assets.mixkit.co/active_storage/sfx/131.mp3',                 
 ];
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -336,9 +336,10 @@ export default function Home() {
   const [triviaCarregandoIA, setTriviaCarregandoIA] = useState(false);
   const [triviaPerguntas, setTriviaPerguntas] = useState<any[]>([]);
   const [triviaPerguntaIdx, setTriviaPerguntaIdx] = useState(0);
-  const [triviaTempoRestante, setTriviaTempoRestante] = useState(12);
-  const [triviaRespostas, setTriviaRespostas] = useState<{ id: string; nome: string; perguntaIdx: number; opcaoIdx: number; pontos: number }[]>([]);
+  const [triviaTempoRestante, setTriviaTempoRestante] = useState(20);
+  const [triviaPlacarLive, setTriviaPlacarLive] = useState<Record<string, { id: string; nome: string; pontos: number; respostas: any[]; concluido: boolean }>>({});
   const [triviaPerdedor, setTriviaPerdedor] = useState<any | null>(null);
+  const [jogadorExpandido, setJogadorExpandido] = useState<string | null>(null);
 
   // ABA PERFIL
   const [perfilSelecionadoId, setPerfilSelecionadoId] = useState<string>('');
@@ -427,20 +428,40 @@ export default function Home() {
         setPresentesMesa(payload.jogadores);
         setTriviaPerguntas(payload.perguntas);
         setTriviaPerguntaIdx(0);
-        setTriviaRespostas([]);
+        setTriviaTempoRestante(20);
         setTriviaPerdedor(null);
-        setTriviaTempoRestante(12);
+        setJogadorExpandido(null);
+
+        const placarInicial: Record<string, any> = {};
+        payload.jogadores.forEach((jId: string) => {
+          const nome = perfis.find(p => p.id === jId)?.nome || 'Jogador';
+          placarInicial[jId] = { id: jId, nome, pontos: 0, respostas: [], concluido: false };
+        });
+        setTriviaPlacarLive(placarInicial);
         setModoDecisaoRodada('trivia');
       })
-      .on('broadcast', { event: 'REGISTO_TRIVIA' }, ({ payload }) => {
-        setTriviaRespostas(prev => {
-          const filtrado = prev.filter(p => !(p.id === payload.id && p.perguntaIdx === payload.perguntaIdx));
-          return [...filtrado, payload];
+      .on('broadcast', { event: 'RESPOSTA_TRIVIA' }, ({ payload }) => {
+        const { jogadorId, nome, perguntaIdx, pergunta, opcaoEscolhida, opcaoCorreta, acertou, pontos, totalPerguntas } = payload;
+        
+        setTriviaPlacarLive(prev => {
+          const atual = prev[jogadorId] || { id: jogadorId, nome, pontos: 0, respostas: [], concluido: false };
+          const novasRespostas = [...atual.respostas];
+          novasRespostas[perguntaIdx] = { pergunta, opcaoEscolhida, opcaoCorreta, acertou };
+          const novosPontos = atual.pontos + (pontos || 0);
+          const numRespostas = novasRespostas.filter(Boolean).length;
+          const estaConcluido = numRespostas >= (totalPerguntas || 10);
+
+          return {
+            ...prev,
+            [jogadorId]: {
+              ...atual,
+              nome,
+              pontos: novosPontos,
+              respostas: novasRespostas,
+              concluido: estaConcluido
+            }
+          };
         });
-      })
-      .on('broadcast', { event: 'PROXIMA_TRIVIA' }, ({ payload }) => {
-        setTriviaPerguntaIdx(payload.proximaIdx);
-        setTriviaTempoRestante(12);
       })
       .subscribe();
 
@@ -482,17 +503,17 @@ export default function Home() {
     }
   }, [reacaoResultados, presentesMesa]);
 
-  // 🧠 TEMPORIZADOR E FIM DO DUELO DE TRIVIA
+  // 🧠 TEMPORIZADOR LOCAL DAS PERGUNTAS DO TRIVIA (20 SEC)
   useEffect(() => {
-    if (modoDecisaoRodada !== 'trivia' || triviaPerguntas.length === 0 || triviaPerdedor) return;
+    if (modoDecisaoRodada !== 'trivia' || triviaPerguntas.length === 0 || triviaPerguntaIdx >= triviaPerguntas.length || triviaPerdedor) return;
 
     if (triviaTimerRef.current) clearInterval(triviaTimerRef.current);
 
     triviaTimerRef.current = setInterval(() => {
       setTriviaTempoRestante(prev => {
         if (prev <= 1) {
-          clearInterval(triviaTimerRef.current);
-          return 0;
+          submeterRespostaLocal(-1);
+          return 20;
         }
         return prev - 1;
       });
@@ -501,32 +522,25 @@ export default function Home() {
     return () => clearInterval(triviaTimerRef.current);
   }, [modoDecisaoRodada, triviaPerguntaIdx, triviaPerguntas, triviaPerdedor]);
 
-  // 🏁 CALCULAR RESULTADO FINAL DO TRIVIA
+  // 🏁 VERIFICAR FIM GLOBAL DO DUELO DE TRIVIA (QUANDO TODOS TERMINAM)
   useEffect(() => {
-    if (modoDecisaoRodada === 'trivia' && triviaPerguntas.length > 0 && triviaPerguntaIdx >= triviaPerguntas.length && !triviaPerdedor) {
-      const pontuacoes: { [id: string]: { nome: string; pontos: number } } = {};
-      presentesMesa.forEach(pId => {
-        const nome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
-        pontuacoes[pId] = { nome, pontos: 0 };
-      });
+    if (modoDecisaoRodada === 'trivia' && triviaPerguntas.length > 0 && !triviaPerdedor) {
+      const listaJogadores = Object.values(triviaPlacarLive);
+      if (listaJogadores.length >= presentesMesa.length && presentesMesa.length >= 2) {
+        const todosConcluidos = presentesMesa.every(pId => {
+          const j = triviaPlacarLive[pId];
+          return j && (j.concluido || (j.respostas && j.respostas.filter(Boolean).length >= triviaPerguntas.length));
+        });
 
-      triviaRespostas.forEach(r => {
-        if (pontuacoes[r.id]) {
-          pontuacoes[r.id].pontos += r.pontos;
+        if (todosConcluidos) {
+          const ordenados = [...listaJogadores].sort((a, b) => a.pontos - b.pontos);
+          const pior = ordenados[0];
+          setTriviaPerdedor(pior);
+          dispararCelebracao();
         }
-      });
-
-      const listaClassificacao = Object.entries(pontuacoes).map(([id, val]) => ({
-        id,
-        nome: val.nome,
-        pontos: val.pontos
-      })).sort((a, b) => a.pontos - b.pontos);
-
-      const pior = listaClassificacao[0];
-      setTriviaPerdedor(pior);
-      dispararCelebracao();
+      }
     }
-  }, [triviaPerguntaIdx, triviaRespostas, modoDecisaoRodada, triviaPerguntas, presentesMesa, triviaPerdedor]);
+  }, [triviaPlacarLive, modoDecisaoRodada, triviaPerguntas, presentesMesa, triviaPerdedor]);
 
   // 🗺️ MAPA DE CLUSTERS LEAFLET
   useEffect(() => {
@@ -1243,7 +1257,7 @@ export default function Home() {
 
     try {
       setTriviaCarregandoIA(true);
-      
+
       const res = await fetch('/api/trivia', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1257,9 +1271,16 @@ export default function Home() {
 
       setTriviaPerguntas(data.perguntas);
       setTriviaPerguntaIdx(0);
-      setTriviaRespostas([]);
+      setTriviaTempoRestante(20);
       setTriviaPerdedor(null);
-      setTriviaTempoRestante(12);
+      setJogadorExpandido(null);
+
+      const placarInicial: Record<string, any> = {};
+      presentesMesa.forEach(pId => {
+        const nome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
+        placarInicial[pId] = { id: pId, nome, pontos: 0, respostas: [], concluido: false };
+      });
+      setTriviaPlacarLive(placarInicial);
 
       channelRef.current?.send({
         type: 'broadcast',
@@ -1273,38 +1294,67 @@ export default function Home() {
     }
   }
 
-  function responderTrivia(opcaoIdx: number) {
-    if (!selectedUser) { mostrarToast('Seleciona quem és tu no telemóvel primeiro!', 'erro'); return; }
-    
-    const jaRespondeu = triviaRespostas.some(r => r.id === selectedUser && r.perguntaIdx === triviaPerguntaIdx);
-    if (jaRespondeu) return;
+  function submeterRespostaLocal(opcaoIdx: number) {
+    if (!selectedUser) {
+      mostrarToast('Seleciona quem és tu no telemóvel primeiro!', 'erro');
+      return;
+    }
+
+    if (triviaPerguntaIdx >= triviaPerguntas.length) return;
 
     const perguntaAtual = triviaPerguntas[triviaPerguntaIdx];
-    const eCorreta = opcaoIdx === perguntaAtual.correta;
-    const pontos = eCorreta ? (10 + triviaTempoRestante) : 0;
+    const acertou = opcaoIdx === perguntaAtual.correta;
+    const pontos = acertou ? 1 : 0;
     const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
 
-    const meuResultado = { id: selectedUser, nome: nomeJogador, perguntaIdx: triviaPerguntaIdx, opcaoIdx, pontos };
+    const payloadResposta = {
+      jogadorId: selectedUser,
+      nome: nomeJogador,
+      perguntaIdx: triviaPerguntaIdx,
+      pergunta: perguntaAtual.pergunta,
+      opcaoEscolhida: opcaoIdx >= 0 ? perguntaAtual.opcoes[opcaoIdx] : 'Tempo Esgotado ⏱️',
+      opcaoCorreta: perguntaAtual.opcoes[perguntaAtual.correta],
+      acertou,
+      pontos,
+      totalPerguntas: triviaPerguntas.length
+    };
 
-    setTriviaRespostas(prev => [...prev.filter(p => !(p.id === selectedUser && p.perguntaIdx === triviaPerguntaIdx)), meuResultado]);
+    // Atualiza imediatamente a nível local
+    setTriviaPlacarLive(prev => {
+      const atual = prev[selectedUser] || { id: selectedUser, nome: nomeJogador, pontos: 0, respostas: [], concluido: false };
+      const novasRespostas = [...atual.respostas];
+      novasRespostas[triviaPerguntaIdx] = {
+        pergunta: perguntaAtual.pergunta,
+        opcaoEscolhida: payloadResposta.opcaoEscolhida,
+        opcaoCorreta: payloadResposta.opcaoCorreta,
+        acertou
+      };
+      const novosPontos = atual.pontos + pontos;
+      const numRespostas = novasRespostas.filter(Boolean).length;
+      const estaConcluido = numRespostas >= triviaPerguntas.length;
 
+      return {
+        ...prev,
+        [selectedUser]: {
+          ...atual,
+          nome: nomeJogador,
+          pontos: novosPontos,
+          respostas: novasRespostas,
+          concluido: estaConcluido
+        }
+      };
+    });
+
+    // Transmite a resposta aos restantes telemóveis
     channelRef.current?.send({
       type: 'broadcast',
-      event: 'REGISTO_TRIVIA',
-      payload: meuResultado
+      event: 'RESPOSTA_TRIVIA',
+      payload: payloadResposta
     });
-  }
 
-  function avancarPerguntaTrivia() {
-    const proximaIdx = triviaPerguntaIdx + 1;
-    setTriviaPerguntaIdx(proximaIdx);
-    setTriviaTempoRestante(12);
-
-    channelRef.current?.send({
-      type: 'broadcast',
-      event: 'PROXIMA_TRIVIA',
-      payload: { proximaIdx }
-    });
+    // Avança apenas no ecrã do jogador atual
+    setTriviaPerguntaIdx(prev => prev + 1);
+    setTriviaTempoRestante(20);
   }
 
   const toggleDia = (dia: string) => setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
@@ -1364,7 +1414,6 @@ export default function Home() {
 
   const meuResultadoCrono = cronoResultados.find(r => r.id === selectedUser);
   const meuResultadoReacao = reacaoResultados.find(r => r.id === selectedUser);
-  const minhaRespostaTrivia = triviaRespostas.find(r => r.id === selectedUser && r.perguntaIdx === triviaPerguntaIdx);
 
   return (
     <>
@@ -2218,7 +2267,7 @@ export default function Home() {
                             onClick={iniciarJogoTriviaIA}
                             className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition active:scale-95"
                           >
-                            🧠 Gerar Perguntas com IA para Todos
+                            🧠 Gerar 10 Perguntas com IA para Todos
                           </button>
                         </div>
                       )}
@@ -2228,7 +2277,7 @@ export default function Home() {
                         <div className="p-8 rounded-2xl bg-black/50 border border-amber-500/30 space-y-3">
                           <div className="text-4xl animate-spin">🧠</div>
                           <p className="text-xs font-black text-amber-400 uppercase tracking-widest">
-                            O Gemini está a criar as perguntas...
+                            O Gemini está a criar 10 perguntas...
                           </p>
                           <p className="text-[10px] text-slate-400">
                             Tema: "{triviaTemaInput || 'Cultura Geral'}"
@@ -2236,86 +2285,184 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* ECRÃ DE PERGUNTAS DO TRIVIA */}
-                      {triviaPerguntas.length > 0 && !triviaPerdedor && (
+                      {/* JOGO EM CURSO / PERGUNTAS ATIVAS */}
+                      {triviaPerguntas.length > 0 && !triviaCarregandoIA && (
                         <div className="space-y-4 text-left">
                           {triviaPerguntaIdx < triviaPerguntas.length ? (
                             <div className="p-4 rounded-2xl bg-black/50 border border-amber-500/30 space-y-3">
                               <div className="flex justify-between items-center text-xs font-black text-amber-400">
                                 <span>Pergunta {triviaPerguntaIdx + 1} de {triviaPerguntas.length}</span>
-                                <span className="bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-full text-white">⏱️ {triviaTempoRestante}s</span>
+                                <span className={`px-2 py-0.5 rounded-full text-white border font-bold ${triviaTempoRestante <= 5 ? 'bg-red-500/30 border-red-500 text-red-300 animate-pulse' : 'bg-amber-500/20 border-amber-500/40'}`}>
+                                  ⏱️ {triviaTempoRestante}s
+                                </span>
                               </div>
+
+                              {/* IMAGEM OPCIONAL DA PERGUNTA */}
+                              {triviaPerguntas[triviaPerguntaIdx].imagemUrl && (
+                                <div className="mb-2 rounded-xl overflow-hidden border border-slate-700 max-h-48 flex justify-center bg-black/50">
+                                  <img 
+                                    src={triviaPerguntas[triviaPerguntaIdx].imagemUrl} 
+                                    alt="Imagem da pergunta" 
+                                    className="object-contain h-48 w-full"
+                                    onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                                  />
+                                </div>
+                              )}
 
                               <p className="text-sm font-extrabold text-white leading-snug">
                                 {triviaPerguntas[triviaPerguntaIdx].pergunta}
                               </p>
 
                               <div className="grid grid-cols-1 gap-2 pt-1">
-                                {triviaPerguntas[triviaPerguntaIdx].opcoes.map((opcao: string, oIdx: number) => {
-                                  const jaRespondeu = !!minhaRespostaTrivia;
-                                  const eMinhaEscolha = minhaRespostaTrivia?.opcaoIdx === oIdx;
-
-                                  return (
-                                    <button
-                                      key={oIdx}
-                                      onClick={() => responderTrivia(oIdx)}
-                                      disabled={jaRespondeu}
-                                      className={`p-3 rounded-xl border text-xs font-bold text-left transition ${
-                                        eMinhaEscolha
-                                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-md'
-                                          : jaRespondeu
-                                            ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
-                                            : 'bg-slate-900/80 border-slate-700 text-slate-200 hover:border-amber-500'
-                                      }`}
-                                    >
-                                      <span className="mr-2 font-black opacity-60">[{String.fromCharCode(65 + oIdx)}]</span>
-                                      {opcao}
-                                    </button>
-                                  );
-                                })}
+                                {triviaPerguntas[triviaPerguntaIdx].opcoes.map((opcao: string, oIdx: number) => (
+                                  <button
+                                    key={oIdx}
+                                    onClick={() => submeterRespostaLocal(oIdx)}
+                                    className="p-3 rounded-xl border border-slate-700 bg-slate-900/90 text-slate-200 text-xs font-bold text-left hover:border-amber-500 hover:bg-slate-800 transition active:scale-[0.98]"
+                                  >
+                                    <span className="mr-2 font-black text-amber-500">[{String.fromCharCode(65 + oIdx)}]</span>
+                                    {opcao}
+                                  </button>
+                                ))}
                               </div>
 
-                              <div className="pt-2 text-center">
-                                <button
-                                  onClick={avancarPerguntaTrivia}
-                                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 font-black text-xs transition border border-slate-700"
-                                >
-                                  ➡️ Próxima Pergunta
-                                </button>
+                              {/* TABELA EM DIRETO (AO VIVO NO RODAPÉ DO JOGO) */}
+                              <div className="pt-3 border-t border-slate-800">
+                                <p className="text-[10px] font-extrabold text-slate-400 mb-2 uppercase tracking-wider">
+                                  📊 Tabela em Direto
+                                </p>
+                                <div className="grid grid-cols-2 gap-1.5 text-xs">
+                                  {presentesMesa.map(pId => {
+                                    const j = triviaPlacarLive[pId];
+                                    const nome = j?.nome || perfis.find(p => p.id === pId)?.nome || 'Jogador';
+                                    const respCount = j?.respostas ? j.respostas.filter(Boolean).length : 0;
+                                    const pontos = j?.pontos || 0;
+                                    return (
+                                      <div key={pId} className="bg-slate-900/80 border border-slate-800 p-2 rounded-lg flex justify-between items-center">
+                                        <span className="truncate font-bold text-slate-200">{nome}</span>
+                                        <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-[10px] font-black border border-amber-500/30">
+                                          {pontos} pts ({respCount}/10)
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             </div>
-                          ) : null}
+                          ) : (
+                            /* ECRÃ DE ESPERA / RESULTADO FINAL */
+                            <div className="space-y-4">
+                              {!triviaPerdedor ? (
+                                /* Jogador local já terminou as 10 perguntas, mas nem todos terminaram */
+                                <div className="p-5 rounded-2xl bg-black/60 border border-amber-500/30 text-center space-y-4">
+                                  <div className="text-3xl animate-bounce">⏳</div>
+                                  <h3 className="text-lg font-black text-amber-400">Terminaste as tuas 10 perguntas!</h3>
+                                  <p className="text-xs text-slate-300">A aguardar que os restantes jogadores concluam o duelo...</p>
 
-                          <div className="space-y-1.5 text-left pt-2">
-                            <p className="text-[10px] font-bold uppercase text-slate-400">Mesa Respondendo (Pergunta {triviaPerguntaIdx + 1}):</p>
-                            {presentesMesa.map(pId => {
-                              const pNome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
-                              const res = triviaRespostas.find(r => r.id === pId && r.perguntaIdx === triviaPerguntaIdx);
-                              return (
-                                <div key={pId} className="flex justify-between items-center text-xs p-2 rounded-lg bg-black/30 border border-slate-800">
-                                  <span className="font-bold">{pNome}</span>
-                                  {res ? (
-                                    <span className="text-emerald-400 font-bold">✅ Respondeu (+{res.pontos} pts)</span>
-                                  ) : (
-                                    <span className="text-amber-500/70 font-semibold italic animate-pulse">⏳ A pensar...</span>
-                                  )}
+                                  {/* TABELA DE PONTOS EM DIRETO ENQUANTO ESPERA */}
+                                  <div className="pt-2 text-left">
+                                    <p className="text-[10px] font-extrabold text-slate-400 mb-2 uppercase tracking-wider">📊 Estado dos Jogadores</p>
+                                    <div className="space-y-1.5">
+                                      {presentesMesa.map(pId => {
+                                        const j = triviaPlacarLive[pId];
+                                        const nome = j?.nome || perfis.find(p => p.id === pId)?.nome || 'Jogador';
+                                        const respCount = j?.respostas ? j.respostas.filter(Boolean).length : 0;
+                                        const pontos = j?.pontos || 0;
+                                        const estaConcluido = j?.concluido || respCount >= 10;
+
+                                        return (
+                                          <div key={pId} className="flex justify-between items-center text-xs p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                                            <span className="font-bold text-white">{nome}</span>
+                                            {estaConcluido ? (
+                                              <span className="text-emerald-400 font-black text-[11px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                                                ✅ Concluído ({pontos}/10 pts)
+                                              </span>
+                                            ) : (
+                                              <span className="text-amber-400 font-bold text-[11px] bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 animate-pulse">
+                                                ⏳ A jogar... ({pontos} pts - {respCount}/10)
+                                              </span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
+                              ) : (
+                                /* Todos terminaram: Classificação Final Expansível */
+                                <div className="p-4 rounded-2xl bg-black/80 border border-amber-500/40 space-y-4">
+                                  <div className="p-4 rounded-xl bg-red-600 border-2 border-yellow-400 text-white text-center shadow-2xl animate-bounce">
+                                    <p className="text-[10px] font-black uppercase tracking-widest opacity-90">🧠 MENOR PONTUAÇÃO DE TRIVIA!</p>
+                                    <h3 className="text-2xl font-black mt-1">🍺 {triviaPerdedor.nome} PAGA A RODADA!</h3>
+                                    <p className="text-xs font-bold mt-1 opacity-90">Ficou em último lugar com apenas {triviaPerdedor.pontos} / 10 pontos!</p>
+                                  </div>
 
-                      {triviaPerdedor && (
-                        <div className="mt-4 p-5 rounded-2xl border text-center shadow-2xl bg-red-600 border-yellow-400 text-white animate-bounce">
-                          <p className="text-[10px] font-black uppercase tracking-widest opacity-80">
-                            🧠 MENOR PONTUAÇÃO DE CULTURA GERAL!
-                          </p>
-                          <h3 className="text-2xl font-black mt-1">🍺 {triviaPerdedor.nome} PAGA A RODADA!</h3>
-                          <p className="text-xs font-bold mt-1 opacity-90">
-                            Ficou em último lugar com apenas {triviaPerdedor.pontos} pontos!
-                          </p>
-                          <button onClick={iniciarJogoTriviaIA} className="mt-3 px-4 py-2 rounded-xl bg-black/30 hover:bg-black/50 font-black text-xs transition">🔄 Jogar Outra Vez</button>
+                                  <h3 className="text-base font-black text-amber-400 text-center">🏆 Classificação Final</h3>
+                                  <p className="text-[10px] text-slate-400 text-center -mt-2">Clica num jogador para ver o histórico de respostas</p>
+
+                                  <div className="space-y-2">
+                                    {Object.values(triviaPlacarLive)
+                                      .sort((a: any, b: any) => b.pontos - a.pontos)
+                                      .map((j: any, index: number, arr: any[]) => {
+                                        const eOPerdedor = j.id === triviaPerdedor.id || index === arr.length - 1;
+                                        const isExpanded = jogadorExpandido === j.id;
+
+                                        return (
+                                          <div key={j.id} className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900/90">
+                                            <button
+                                              onClick={() => setJogadorExpandido(isExpanded ? null : j.id)}
+                                              className="w-full p-3 flex justify-between items-center text-left hover:bg-slate-800/80 transition"
+                                            >
+                                              <div className="flex items-center gap-2">
+                                                <span className="font-black text-slate-400 text-xs">#{index + 1}</span>
+                                                <span className="font-bold text-white text-xs">{j.nome}</span>
+                                                {eOPerdedor && (
+                                                  <span className="text-[9px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-black border border-red-500/30">
+                                                    Paga o fino! 🍺
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-amber-400 font-extrabold text-xs">{j.pontos} / 10 pts</span>
+                                                <span className="text-xs text-slate-400">{isExpanded ? '🔼' : '🔽'}</span>
+                                              </div>
+                                            </button>
+
+                                            {/* DETALHES EXPANSÍVEIS DE RESPOSTAS */}
+                                            {isExpanded && (
+                                              <div className="p-3 bg-slate-950 border-t border-slate-800 space-y-2 text-xs">
+                                                {j.respostas && j.respostas.length > 0 ? (
+                                                  j.respostas.map((r: any, idx: number) => (
+                                                    <div key={idx} className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                                                      <p className="font-semibold text-slate-200 mb-1 text-[11px]">{idx + 1}. {r?.pergunta}</p>
+                                                      <p className={r?.acertou ? 'text-emerald-400 font-bold text-[10px]' : 'text-red-400 font-bold text-[10px]'}>
+                                                        {r?.acertou ? '✓ Certo:' : '✗ Escolheu:'} <span className="font-medium text-white">{r?.opcaoEscolhida}</span>
+                                                      </p>
+                                                      {!r?.acertou && (
+                                                        <p className="text-slate-400 text-[10px] mt-0.5">Correta: <span className="text-emerald-400 font-medium">{r?.opcaoCorreta}</span></p>
+                                                      )}
+                                                    </div>
+                                                  ))
+                                                ) : (
+                                                  <p className="text-slate-500 italic text-[11px]">Sem respostas registadas.</p>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                  </div>
+
+                                  <button
+                                    onClick={iniciarJogoTriviaIA}
+                                    className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition active:scale-95"
+                                  >
+                                    🔄 Jogar Outro Duelo
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                     </>
