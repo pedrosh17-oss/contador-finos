@@ -204,7 +204,7 @@ function formatarFinos(val: number): string {
 }
 
 export default function Home() {
-  const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'rodada' | 'mapa' | 'feitos' | 'historico'>('inicio');
+  const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'perfil' | 'rodada' | 'mapa' | 'feitos' | 'historico'>('inicio');
   const [toast, setToast] = useState<{msg: string, tipo: 'erro' | 'sucesso'} | null>(null);
 
   const [modalGregorioOpen, setModalGregorioOpen] = useState(false);
@@ -238,6 +238,10 @@ export default function Home() {
   const [roletaRodadaId, setRoletaRodadaId] = useState<string | null>(null);
   const [vitimaRodada, setVitimaRodada] = useState<any | null>(null);
 
+  // ABA PERFIL (FICHA MÉDICA)
+  const [perfilSelecionadoId, setPerfilSelecionadoId] = useState<string>('');
+  const [seletorPerfilAberto, setSeletorPerfilAberto] = useState(false);
+
   // REFERÊNCIA DO MAPA
   const mapRef = useRef<any>(null);
 
@@ -270,24 +274,27 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    if (selectedUser && !perfilSelecionadoId) {
+      setPerfilSelecionadoId(selectedUser);
+    }
+  }, [selectedUser]);
+
   // 🗺️ EFEITO DE CARREGAMENTO DO MAPA DE CALOR LEAFLET
   useEffect(() => {
     if (abaAtiva === 'mapa' && typeof window !== 'undefined') {
       const L = (window as any).L;
       if (!L) return;
 
-      // Destrói instância anterior se existir
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
 
-      // Pontos com coordenadas válidas para o mapa de calor
       const pontosCoordenadas = finos
         .filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio')
         .map(f => [Number(f.lat), Number(f.lng), (f.quantidade_equivalente ?? 1) * 0.5]);
 
-      // Centro padrão (Porto/Lisboa se não houver pontos)
       const centroInicial = pontosCoordenadas.length > 0
         ? [pontosCoordenadas[0][0], pontosCoordenadas[0][1]]
         : [41.1579, -8.6291];
@@ -295,14 +302,12 @@ export default function Home() {
       const map = L.map('mapa-calor-container').setView(centroInicial, 12);
       mapRef.current = map;
 
-      // Camada de mapa estilo escuro / elegante
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap &copy; CARTO',
         subdomains: 'abcd',
         maxZoom: 19
       }).addTo(map);
 
-      // Renderiza mapa de calor se houver pontos
       if (pontosCoordenadas.length > 0 && L.heatLayer) {
         L.heatLayer(pontosCoordenadas, {
           radius: 25,
@@ -311,7 +316,6 @@ export default function Home() {
           gradient: { 0.4: 'blue', 0.65: 'lime', 0.8: 'yellow', 1.0: 'red' }
         }).addTo(map);
 
-        // Ajusta o zoom para enquadrar todos os pontos globais
         const bounds = L.latLngBounds(pontosCoordenadas.map((p: any) => [p[0], p[1]]));
         map.fitBounds(bounds, { padding: [30, 30] });
       }
@@ -486,7 +490,6 @@ export default function Home() {
       const file = e.target.files?.[0];
       let photoUrl: string | null = null;
 
-      // 📍 APANHAR COORDENADAS GPS
       const coords = await obterLocalizacaoGPS();
 
       if (file) {
@@ -649,6 +652,18 @@ export default function Home() {
     return list;
   }
 
+  // RANKING ABSOLUTO / GERAL
+  const rankingAbsoluto = perfis
+    .map((p) => {
+      const countGeral = finosValidos
+        .filter((f) => f.perfil_id === p.id)
+        .reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
+      return { ...p, countGeral };
+    })
+    .sort((a, b) => b.countGeral - a.countGeral);
+
+  const reiDoFinoAbsoluto = rankingAbsoluto[0];
+
   const contagemPorPessoa = perfis
     .map((p) => {
       const userFinosGeral = finos.filter((f) => f.perfil_id === p.id);
@@ -677,10 +692,6 @@ export default function Home() {
       return { ...p, count, conquistas, gregorios, userFinosValidos, periodoForte };
     })
     .sort((a, b) => b.count - a.count);
-
-  const maxFinos = contagemPorPessoa[0]?.count || 0;
-  const reiDoFino = contagemPorPessoa[0];
-  const media = perfis.length > 0 ? (totalFinosEq / perfis.length).toFixed(1) : '0';
 
   const statsStreaks = perfis.map(p => {
     const pFinos = finosValidos.filter(f => f.perfil_id === p.id);
@@ -800,10 +811,42 @@ export default function Home() {
     return acc;
   }, {});
 
-  // 🗺️ ITEM DO MAPA ADICIONADO AO MENU
+  // CÁLCULOS DA ABA DE PERFIL DO UTILIZADOR SELECIONADO
+  const perfilAtualObj = perfis.find(p => p.id === perfilSelecionadoId);
+  const userFinosValidosAtual = finosValidos.filter(f => f.perfil_id === perfilSelecionadoId);
+  const totalUserEqAtual = userFinosValidosAtual.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
+  const litrosNoSangueAtual = (totalUserEqAtual * 0.20).toFixed(1);
+  const percentualColoGrupo = totalFinosGeralEq > 0 ? ((totalUserEqAtual / totalFinosGeralEq) * 100).toFixed(1) : '0.0';
+  const melhorStreakAtual = statsStreaks.find(s => s.id === perfilSelecionadoId)?.maxStreak || 0;
+  const conquistasAtual = perfilSelecionadoId ? calcularConquistas(userFinosValidosAtual, perfilSelecionadoId) : [];
+  
+  const posGeralIndex = rankingAbsoluto.findIndex(p => p.id === perfilSelecionadoId);
+  const tituloOficialAtual = posGeralIndex !== -1 ? (TITULOS_RANKING[posGeralIndex] || TITULOS_RANKING[TITULOS_RANKING.length - 1]) : '-';
+
+  const userFinosGeralTodos = finos.filter((f) => f.perfil_id === perfilSelecionadoId);
+  const totalVomitosUser = userFinosGeralTodos.filter(f => f.tipo_bebida === 'gregorio').length;
+  const paceCardiacoUser = ritmoUsers.find(r => r.id === perfilSelecionadoId)?.paceMin || 0;
+
+  const userPeriodos = { 'Madrugada 🧛‍♂️': 0, 'Manhã 🍳': 0, 'Tarde 🌇': 0, 'Noite 🌃': 0 };
+  userFinosValidosAtual.forEach(f => {
+    const h = new Date(f.data_hora).getHours();
+    const val = f.quantidade_equivalente ?? 1;
+    if (h >= 0 && h < 6) userPeriodos['Madrugada 🧛‍♂️'] += val;
+    else if (h >= 6 && h < 12) userPeriodos['Manhã 🍳'] += val;
+    else if (h >= 12 && h < 18) userPeriodos['Tarde 🌇'] += val;
+    else userPeriodos['Noite 🌃'] += val;
+  });
+  let horarioCriticoUser = 'Sem dados';
+  let maxPUser = 0;
+  for (const [k, v] of Object.entries(userPeriodos)) {
+    if (v > maxPUser && v > 0) { maxPUser = v; horarioCriticoUser = k; }
+  }
+
+  // 🗺️ ITEM DO MAPA E PERFIL ADICIONADOS AO MENU
   const navItems = [
     { id: 'inicio', label: 'Início', icon: '🏠' },
     { id: 'ranking', label: 'Ranking', icon: '📊' },
+    { id: 'perfil', label: 'Perfil', icon: '🪪' },
     { id: 'rodada', label: 'Rodada', icon: '🎲' },
     { id: 'mapa', label: 'Mapa', icon: '🗺️' },
     { id: 'feitos', label: 'Feitos', icon: '🎯' },
@@ -905,7 +948,6 @@ export default function Home() {
         {abaAtiva === 'inicio' && (
           <div className="space-y-6">
             
-            {/* CONTAGEM DE DIAS DO PROJETO + STREAK DO GRUPO */}
             <div className="grid grid-cols-2 gap-2 text-center">
               <div className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 ${cardClasses}`}>
                 <span className="text-xl">📅</span>
@@ -928,15 +970,15 @@ export default function Home() {
                 <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Total Equivalente</p>
                 <p className={`text-3xl font-black leading-tight mt-1 ${isModoFesta ? 'text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'text-amber-500'}`}>{formatarFinos(totalFinosGeralEq)}</p>
               </div>
+              {/* LÍDER FIXO ABSOLUTO DA HOME */}
               <div className={`p-4 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
-                <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Líder 🍾</p>
+                <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Líder Absoluto 🍾</p>
                 <p className="text-xl font-black truncate mt-1 text-inherit">
-                  {reiDoFino && reiDoFino.count > 0 ? reiDoFino.nome : '-'}
+                  {reiDoFinoAbsoluto && reiDoFinoAbsoluto.countGeral > 0 ? reiDoFinoAbsoluto.nome : '-'}
                 </p>
               </div>
             </div>
 
-            {/* SELETOR DE MODO: INDIVIDUAL OU REGISTAR RODADA */}
             <div className={`p-1.5 rounded-2xl border flex gap-1 ${cardClasses}`}>
               <button
                 onClick={() => setModoRegisto('individual')}
@@ -974,7 +1016,6 @@ export default function Home() {
                 {perfis.map((p) => (<option key={p.id} value={p.id}>{p.nome}</option>))}
               </select>
 
-              {/* SE MODO RODADA ATIVO: MARCAR AMIGOS QUE BEBERAM */}
               {modoRegisto === 'rodada' && (
                 <div className="mt-3 pt-3 border-t border-slate-800/50">
                   <label className="block font-extrabold text-xs uppercase tracking-wider mb-2 text-amber-500">
@@ -1108,6 +1149,7 @@ export default function Home() {
                       <div className="flex justify-between items-center text-sm">
                         <div className="truncate pr-2">
                           <span className="font-bold">{idx + 1}. {p.nome}</span>
+                          {p.nome_real && <span className="text-[10px] text-slate-400 ml-1.5 font-normal">({p.nome_real})</span>}
                           <span className="text-[10px] text-amber-500 font-semibold block mt-0.5">{statusBadge}</span>
                         </div>
                         <div className="text-right flex items-center gap-2 shrink-0">
@@ -1254,6 +1296,146 @@ export default function Home() {
           </div>
         )}
 
+        {/* 🪪 SEPARADOR: PERFIL E FICHA MÉDICA DO BEBEDOR */}
+        {abaAtiva === 'perfil' && (
+          <div className="space-y-6">
+            <div className={`p-5 rounded-2xl shadow border transition-colors ${cardClasses}`}>
+              <h2 className="font-black text-xl mb-4 flex items-center gap-2">🪪 Ficha Médica</h2>
+
+              {/* SELETOR DE PERFIL CUSTOMIZADO */}
+              <div className="relative mb-6">
+                <button 
+                  onClick={() => setSeletorPerfilAberto(!seletorPerfilAberto)}
+                  className={`w-full p-3 rounded-xl border font-black text-left flex justify-between items-center transition ${
+                    isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-700 text-white shadow-lg' : 'bg-white border-slate-300 text-slate-800 shadow-md'
+                  }`}
+                >
+                  <span className="truncate">
+                    {perfilAtualObj ? `${perfilAtualObj.nome} ${perfilAtualObj.nome_real ? `(${perfilAtualObj.nome_real})` : ''}` : '-- Escolhe o doente --'}
+                  </span>
+                  <span className={`transform transition-transform ${seletorPerfilAberto ? 'rotate-180' : ''}`}>▼</span>
+                </button>
+
+                {seletorPerfilAberto && (
+                  <div className={`absolute top-full left-0 right-0 mt-2 rounded-xl border shadow-2xl overflow-hidden z-50 max-h-60 overflow-y-auto ${
+                    isModoFesta ? 'bg-black/90 border-white/20 backdrop-blur-md' : darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                  }`}>
+                    {perfis.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => { setPerfilSelecionadoId(p.id); setSeletorPerfilAberto(false); }}
+                        className={`w-full p-3 text-left border-b font-bold text-sm transition hover:bg-amber-500/20 last:border-0 ${
+                          perfilSelecionadoId === p.id 
+                            ? 'bg-amber-500/10 text-amber-500 border-slate-800/50' 
+                            : isModoFesta ? 'text-white border-white/10' : darkMode ? 'text-slate-300 border-slate-800' : 'text-slate-700 border-slate-100'
+                        }`}
+                      >
+                        {p.nome} {p.nome_real && <span className="opacity-60 text-xs font-normal">({p.nome_real})</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {perfilAtualObj && (
+                <div className="space-y-4 pt-2 border-t border-slate-800/50">
+                  
+                  {/* IDENTIFICAÇÃO E TÍTULO */}
+                  <div className="grid grid-cols-2 gap-2 text-center">
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">🤠 Nome de Código</p>
+                      <p className="text-base font-black mt-0.5 text-amber-500 truncate">{perfilAtualObj.nome}</p>
+                    </div>
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">🎖️ Estatuto Oficial</p>
+                      <p className="text-xs font-black mt-1 text-orange-400 truncate">{tituloOficialAtual}</p>
+                    </div>
+                  </div>
+
+                  {/* SINAIS VITAIS GERAIS */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">🍺 Medicação Ingerida</p>
+                      <p className="text-lg font-black mt-0.5 text-amber-500">{formatarFinos(totalUserEqAtual)} <span className="text-xs font-semibold text-slate-400">finos</span></p>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">🩸 Litros no Sangue</p>
+                      <p className="text-lg font-black mt-0.5 text-red-400">{litrosNoSangueAtual} <span className="text-xs font-semibold text-slate-400">L</span></p>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">📊 Carga no Grupo</p>
+                      <p className="text-lg font-black mt-0.5 text-cyan-400">{percentualColoGrupo}%</p>
+                      <p className="text-[8px] text-slate-500 leading-tight mt-0.5">do consumo total</p>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">🧨 Recorde de Streak</p>
+                      <p className="text-lg font-black mt-0.5 text-orange-500">{melhorStreakAtual} <span className="text-xs font-semibold text-slate-400">dias</span></p>
+                    </div>
+                  </div>
+
+                  {/* NOVOS SINAIS VITAIS CLÍNICOS */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className={`p-3 rounded-xl border flex flex-col justify-center items-center text-center ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400 w-full">📈 Pace Cardíaco</p>
+                      <p className="text-sm font-black mt-1 text-fuchsia-400">
+                        {paceCardiacoUser > 0 ? `1 copo a cada ${paceCardiacoUser} min` : 'Sem dados suficientes'}
+                      </p>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border flex flex-col justify-center items-center text-center ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400 w-full">⏰ Horário Crítico</p>
+                      <p className="text-sm font-black mt-1 text-yellow-400">{horarioCriticoUser}</p>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border flex flex-col justify-center items-center text-center ${
+                      totalVomitosUser > 0 
+                        ? 'bg-red-500/10 border-red-500/30' 
+                        : isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'
+                    }`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400 w-full">🤢 Nível de Risco</p>
+                      <p className={`text-sm font-black mt-1 ${totalVomitosUser > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {totalVomitosUser === 0 ? 'Fígado de Ferro 🛡️' : `Risco Elevado ☣️ (${totalVomitosUser}x)`}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* CABINE DE TROFÉUS */}
+                  <div className="pt-3">
+                    <p className="text-xs font-black uppercase text-amber-500 mb-2 tracking-wider flex items-center gap-1.5">
+                      <span>🏆 Cabine de Troféus</span>
+                      <span className="text-[10px] text-slate-500 font-semibold">({conquistasAtual.length})</span>
+                    </p>
+                    {conquistasAtual.length === 0 ? (
+                      <p className="text-xs text-slate-500 py-2 italic text-center">Ainda sem troféus desbloqueados. É preciso dar mais uso ao copo!</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {conquistasAtual.map((badge, idx) => (
+                          <div 
+                            key={idx} 
+                            className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black border shadow-sm flex items-center gap-1 ${
+                              badge.includes('👑') || badge.includes('🏆')
+                                ? 'bg-amber-500 text-slate-950 border-amber-300'
+                                : badge.includes('💸')
+                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            }`}
+                          >
+                            <span>{badge}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* SEPARADOR: SORTEADOR DA PRÓXIMA RODADA */}
         {abaAtiva === 'rodada' && (
           <div className="space-y-6">
@@ -1338,7 +1520,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* 🗺️ SEPARADOR NOVO: MAPA DE CALOR MUNDIAL 🔥 */}
+        {/* 🗺️ SEPARADOR: MAPA DE CALOR MUNDIAL 🔥 */}
         {abaAtiva === 'mapa' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
