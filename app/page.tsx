@@ -337,9 +337,13 @@ export default function Home() {
 
   // 🗺️ MAPA DE CLUSTERS DE EMOJIS LEAFLET
   useEffect(() => {
-    if (abaAtiva === 'mapa' && typeof window !== 'undefined') {
+    if (abaAtiva !== 'mapa' || typeof window === 'undefined') return;
+
+    let intervalId: any = null;
+
+    const inicializarMapa = () => {
       const L = (window as any).L;
-      if (!L || !L.markerClusterGroup) return;
+      if (!L || !L.markerClusterGroup) return false;
 
       if (!mapRef.current) {
         const map = L.map('mapa-calor-container').setView([41.1579, -8.6291], 6);
@@ -409,7 +413,20 @@ export default function Home() {
       }
 
       setTimeout(() => { mapRef.current?.invalidateSize(); }, 200);
+      return true;
+    };
+
+    if (!inicializarMapa()) {
+      intervalId = setInterval(() => {
+        if (inicializarMapa()) {
+          clearInterval(intervalId);
+        }
+      }, 150);
     }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [abaAtiva, finos]);
 
   const handleAtivarNotificacoes = async () => {
@@ -714,7 +731,6 @@ export default function Home() {
 
     if (diasUnicosMs.length > 0) {
       const lastDayMs = diasUnicosMs[diasUnicosMs.length - 1];
-      // Se não bebeu hoje nem ontem, foi a zero. Se bebeu ontem, mantém o streak à espera do copo de hoje.
       if (lastDayMs === hojeMs || lastDayMs === ontemMs) curS = tempS; 
       else curS = 0;
     }
@@ -757,6 +773,17 @@ export default function Home() {
     });
     if (countDiff > 0) ritmoUsers.push({ id: p.id, nome: p.nome, paceMin: Math.round((totalDiff / countDiff) / 60000) });
   });
+
+  // ⚔️ ESTATÍSTICAS DO FRENTE-A-FRENTE (1V1)
+  function getFighterStats(id: string) {
+    const pCount = contagemPorPessoa.find(p => p.id === id)?.count || 0;
+    const pStreak = statsStreaks.find(s => s.id === id)?.maxStreak || 0;
+    const pRitmo = ritmoUsers.find(r => r.id === id)?.paceMin || Infinity;
+    return { count: pCount, streak: pStreak, ritmo: pRitmo };
+  }
+
+  const f1Stats = fighter1 ? getFighterStats(fighter1) : null;
+  const f2Stats = fighter2 ? getFighterStats(fighter2) : null;
 
   // LÓGICA DO SORTEADOR DA RODADA
   const toggleMesa = (id: string) => { setPresentesMesa(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]); };
