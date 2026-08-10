@@ -26,7 +26,7 @@ const TITULOS_RANKING = [
   '🧼 Conas de sabão, faz-te homem!'
 ];
 
-// 🍻 NOVOS TIPOS DE BEBIDA E EQUIVALÊNCIAS
+// 🍻 TIPOS DE BEBIDA E EQUIVALÊNCIAS
 const TIPOS_BEBIDA = {
   fino: { label: '🥂 Fino / Mini', equivalencia: 1.0, emoji: '🥂' },
   principe: { label: '🥃 Príncipe / Garrafa', equivalencia: 1.5, emoji: '🥃' },
@@ -76,6 +76,14 @@ const MARCOS_GRUPO = [
   { meta: 900, texto: "180 Litros OU CRL... O guito daria para pagar a renda de um T1 fora do centro durante 2 meses." },
   { meta: 950, texto: "O volume enchia o estômago de camelo adulto até ele não ter mais sede. QUE CAMPEÕES!" },
   { meta: 1000, texto: "1.000 FINOS! 200 LITROS DE CERVEJA! O volume total enchia rigorosamente a bagageira de um Volkswagen Golf de 2020 até ao teto! Somos grandes!" }
+];
+
+const TEMAS_RAPIDOS_TRIVIA = [
+  '🍺 Cerveja & Tascos',
+  '⚽ Futebol Nacional',
+  '🎵 Música Anos 2000',
+  '🎬 Cinema & Séries',
+  '🇵🇹 Cultura Tuga'
 ];
 
 const SONS_CELEBRACAO = [
@@ -290,7 +298,7 @@ export default function Home() {
   const [fighter2, setFighter2] = useState<string>('');
 
   // 🎲 ABA RODADA & MINI-JOGOS
-  const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo' | 'reacao'>('roleta');
+  const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo' | 'reacao' | 'trivia'>('roleta');
   const [presentesMesa, setPresentesMesa] = useState<string[]>([]);
   const [seletorTelemovelAberto, setSeletorTelemovelAberto] = useState(false);
 
@@ -323,6 +331,15 @@ export default function Home() {
   const [reacaoResultados, setReacaoResultados] = useState<{ id: string; nome: string; tempoMs: number | null; falsaPartida: boolean }[]>([]);
   const [reacaoPerdedor, setReacaoPerdedor] = useState<any | null>(null);
 
+  // 🧠 JOGO DUELO DE TRIVIA COM IA
+  const [triviaTemaInput, setTriviaTemaInput] = useState('');
+  const [triviaCarregandoIA, setTriviaCarregandoIA] = useState(false);
+  const [triviaPerguntas, setTriviaPerguntas] = useState<any[]>([]);
+  const [triviaPerguntaIdx, setTriviaPerguntaIdx] = useState(0);
+  const [triviaTempoRestante, setTriviaTempoRestante] = useState(12);
+  const [triviaRespostas, setTriviaRespostas] = useState<{ id: string; nome: string; perguntaIdx: number; opcaoIdx: number; pontos: number }[]>([]);
+  const [triviaPerdedor, setTriviaPerdedor] = useState<any | null>(null);
+
   // ABA PERFIL
   const [perfilSelecionadoId, setPerfilSelecionadoId] = useState<string>('');
   const [seletorPerfilAberto, setSeletorPerfilAberto] = useState(false);
@@ -332,6 +349,7 @@ export default function Home() {
   const timerIntervalRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
   const reacaoTimerRef = useRef<any>(null);
+  const triviaTimerRef = useRef<any>(null);
 
   useEffect(() => {
     fetchDados();
@@ -405,12 +423,32 @@ export default function Home() {
           return [...filtrado, payload];
         });
       })
+      .on('broadcast', { event: 'INICIAR_TRIVIA' }, ({ payload }) => {
+        setPresentesMesa(payload.jogadores);
+        setTriviaPerguntas(payload.perguntas);
+        setTriviaPerguntaIdx(0);
+        setTriviaRespostas([]);
+        setTriviaPerdedor(null);
+        setTriviaTempoRestante(12);
+        setModoDecisaoRodada('trivia');
+      })
+      .on('broadcast', { event: 'REGISTO_TRIVIA' }, ({ payload }) => {
+        setTriviaRespostas(prev => {
+          const filtrado = prev.filter(p => !(p.id === payload.id && p.perguntaIdx === payload.perguntaIdx));
+          return [...filtrado, payload];
+        });
+      })
+      .on('broadcast', { event: 'PROXIMA_TRIVIA' }, ({ payload }) => {
+        setTriviaPerguntaIdx(payload.proximaIdx);
+        setTriviaTempoRestante(12);
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(canalRealtime);
       supabase.removeChannel(canalJogos);
       if (reacaoTimerRef.current) clearTimeout(reacaoTimerRef.current);
+      if (triviaTimerRef.current) clearInterval(triviaTimerRef.current);
     };
   }, []);
 
@@ -443,6 +481,52 @@ export default function Home() {
       dispararCelebracao();
     }
   }, [reacaoResultados, presentesMesa]);
+
+  // 🧠 TEMPORIZADOR E FIM DO DUELO DE TRIVIA
+  useEffect(() => {
+    if (modoDecisaoRodada !== 'trivia' || triviaPerguntas.length === 0 || triviaPerdedor) return;
+
+    if (triviaTimerRef.current) clearInterval(triviaTimerRef.current);
+
+    triviaTimerRef.current = setInterval(() => {
+      setTriviaTempoRestante(prev => {
+        if (prev <= 1) {
+          clearInterval(triviaTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(triviaTimerRef.current);
+  }, [modoDecisaoRodada, triviaPerguntaIdx, triviaPerguntas, triviaPerdedor]);
+
+  // 🏁 CALCULAR RESULTADO FINAL DO TRIVIA
+  useEffect(() => {
+    if (modoDecisaoRodada === 'trivia' && triviaPerguntas.length > 0 && triviaPerguntaIdx >= triviaPerguntas.length && !triviaPerdedor) {
+      const pontuacoes: { [id: string]: { nome: string; pontos: number } } = {};
+      presentesMesa.forEach(pId => {
+        const nome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
+        pontuacoes[pId] = { nome, pontos: 0 };
+      });
+
+      triviaRespostas.forEach(r => {
+        if (pontuacoes[r.id]) {
+          pontuacoes[r.id].pontos += r.pontos;
+        }
+      });
+
+      const listaClassificacao = Object.entries(pontuacoes).map(([id, val]) => ({
+        id,
+        nome: val.nome,
+        pontos: val.pontos
+      })).sort((a, b) => a.pontos - b.pontos);
+
+      const pior = listaClassificacao[0];
+      setTriviaPerdedor(pior);
+      dispararCelebracao();
+    }
+  }, [triviaPerguntaIdx, triviaRespostas, modoDecisaoRodada, triviaPerguntas, presentesMesa, triviaPerdedor]);
 
   // 🗺️ MAPA DE CLUSTERS LEAFLET
   useEffect(() => {
@@ -1151,6 +1235,76 @@ export default function Home() {
     }
   }
 
+  // ==========================================
+  // 🧠 LÓGICA DO JOGO 4: DUELO DE TRIVIA COM IA
+  // ==========================================
+  async function iniciarJogoTriviaIA() {
+    if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa!', 'erro'); return; }
+
+    try {
+      setTriviaCarregandoIA(true);
+      
+      const res = await fetch('/api/trivia', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tema: triviaTemaInput })
+      });
+
+      const data = await res.json();
+      if (data.error || !data.perguntas) throw new Error(data.error || 'Erro ao gerar');
+
+      setTriviaPerguntas(data.perguntas);
+      setTriviaPerguntaIdx(0);
+      setTriviaRespostas([]);
+      setTriviaPerdedor(null);
+      setTriviaTempoRestante(12);
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'INICIAR_TRIVIA',
+        payload: { perguntas: data.perguntas, jogadores: presentesMesa }
+      });
+    } catch (e: any) {
+      mostrarToast('Falha na IA do Gemini. Tenta outro tema!', 'erro');
+    } finally {
+      setTriviaCarregandoIA(false);
+    }
+  }
+
+  function responderTrivia(opcaoIdx: number) {
+    if (!selectedUser) { mostrarToast('Seleciona quem és tu no telemóvel primeiro!', 'erro'); return; }
+    
+    const jaRespondeu = triviaRespostas.some(r => r.id === selectedUser && r.perguntaIdx === triviaPerguntaIdx);
+    if (jaRespondeu) return;
+
+    const perguntaAtual = triviaPerguntas[triviaPerguntaIdx];
+    const eCorreta = opcaoIdx === perguntaAtual.correta;
+    const pontos = eCorreta ? (10 + triviaTempoRestante) : 0;
+    const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
+
+    const meuResultado = { id: selectedUser, nome: nomeJogador, perguntaIdx: triviaPerguntaIdx, opcaoIdx, pontos };
+
+    setTriviaRespostas(prev => [...prev.filter(p => !(p.id === selectedUser && p.perguntaIdx === triviaPerguntaIdx)), meuResultado]);
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'REGISTO_TRIVIA',
+      payload: meuResultado
+    });
+  }
+
+  function avancarPerguntaTrivia() {
+    const proximaIdx = triviaPerguntaIdx + 1;
+    setTriviaPerguntaIdx(proximaIdx);
+    setTriviaTempoRestante(12);
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'PROXIMA_TRIVIA',
+      payload: { proximaIdx }
+    });
+  }
+
   const toggleDia = (dia: string) => setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
   const finosPorDiaParaLista = finos.reduce((acc: { [key: string]: any[] }, fino) => {
     const dataStr = new Date(fino.data_hora).toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1208,6 +1362,7 @@ export default function Home() {
 
   const meuResultadoCrono = cronoResultados.find(r => r.id === selectedUser);
   const meuResultadoReacao = reacaoResultados.find(r => r.id === selectedUser);
+  const minhaRespostaTrivia = triviaRespostas.find(r => r.id === selectedUser && r.perguntaIdx === triviaPerguntaIdx);
 
   return (
     <>
@@ -1656,6 +1811,12 @@ export default function Home() {
                 >
                   ⚡ Reação
                 </button>
+                <button
+                  onClick={() => setModoDecisaoRodada('trivia')}
+                  className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'trivia' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🧠 Trivia IA
+                </button>
               </div>
 
               {/* SELEÇÃO DA MESA (COMUM A TODOS OS JOGOS) */}
@@ -1695,7 +1856,6 @@ export default function Home() {
               {/* OPÇÃO 1: ROLETA COM 3 ROLOS VERTICAIS 🎰 */}
               {modoDecisaoRodada === 'roleta' && (
                 <div className="mt-4 pt-4 border-t border-slate-800/50 space-y-4">
-                  
                   <div className={`p-4 rounded-2xl border shadow-2xl ${darkMode ? 'bg-black/80 border-slate-800' : 'bg-amber-100/50 border-amber-200'}`}>
                     <p className="text-[10px] font-black uppercase text-amber-500 tracking-widest text-center mb-3">
                       🎰 ROLETA
@@ -1734,7 +1894,6 @@ export default function Home() {
                     {slotSpinning ? 'A girar a roleta... 🎰' : '🎰 RODAR'}
                   </button>
 
-                  {/* POP-UP MODAL DE RESULTADO TIPO CASINO */}
                   {vitimaRodada && (
                     <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-[80] animate-fadeIn">
                       <div className={`w-full max-w-xs rounded-3xl p-6 text-center border-2 shadow-2xl transform transition-all scale-105 ${
@@ -1773,7 +1932,7 @@ export default function Home() {
                 </div>
               )}
 
-              {/* OPÇÃO 2: CRONÓMETRO CEGO (MULTIPLAYER SIMULTÂNEO) */}
+              {/* OPÇÃO 2: CRONÓMETRO CEGO MULTIPLAYER */}
               {modoDecisaoRodada === 'cronometro' && (
                 <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
                   <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
@@ -1859,7 +2018,7 @@ export default function Home() {
                 </div>
               )}
 
-              {/* OPÇÃO 3: COPO DA MORTE (MULTIPLAYER SIMULTÂNEO) */}
+              {/* OPÇÃO 3: COPO DA MORTE MULTIPLAYER */}
               {modoDecisaoRodada === 'copo' && (
                 <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
                   {presentesMesa.length >= 2 ? (
@@ -1920,7 +2079,7 @@ export default function Home() {
                 </div>
               )}
 
-              {/* OPÇÃO 4: TESTE DE REAÇÃO (MULTIPLAYER SIMULTÂNEO) ⚡ */}
+              {/* OPÇÃO 4: TESTE DE REAÇÃO MULTIPLAYER ⚡ */}
               {modoDecisaoRodada === 'reacao' && (
                 <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
                   {presentesMesa.length >= 2 ? (
@@ -2006,6 +2165,155 @@ export default function Home() {
                               : `Foi o mais lento com ${reacaoPerdedor.tempoMs} ms!`}
                           </p>
                           <button onClick={iniciarJogoReacaoMultiplayer} className="mt-3 px-4 py-2 rounded-xl bg-black/30 hover:bg-black/50 font-black text-xs transition">🔄 Jogar Outra Vez</button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-500 py-2">Seleciona pelo menos 2 pessoas na mesa para jogar!</p>
+                  )}
+                </div>
+              )}
+
+              {/* OPÇÃO 5: DUELO DE TRIVIA COM IA GERATIVA 🧠 */}
+              {modoDecisaoRodada === 'trivia' && (
+                <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
+                  {presentesMesa.length >= 2 ? (
+                    <>
+                      {/* CONFIGURAÇÃO DO TEMA ANTES DE COMEÇAR */}
+                      {triviaPerguntas.length === 0 && !triviaCarregandoIA && (
+                        <div className="space-y-3 p-3 rounded-2xl bg-black/40 border border-slate-800 text-left">
+                          <label className="block text-[10px] font-black uppercase text-amber-500">
+                            🎯 Escolhe ou escreve o tema do duelo:
+                          </label>
+
+                          {/* BOTÕES DE ATALHO RÁPIDO */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {TEMAS_RAPIDOS_TRIVIA.map(t => (
+                              <button
+                                key={t}
+                                onClick={() => setTriviaTemaInput(t)}
+                                className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold border transition ${
+                                  triviaTemaInput === t 
+                                    ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' 
+                                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-500/50'
+                                }`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* CAIXA DE TEXTO LIVRE */}
+                          <input
+                            type="text"
+                            placeholder="Ou escreve o tema que quiseres... (ex: Filmes Franceses)"
+                            className="w-full p-2.5 rounded-xl border border-slate-700 bg-slate-900 text-white font-bold text-xs outline-none focus:border-amber-500"
+                            value={triviaTemaInput}
+                            onChange={(e) => setTriviaTemaInput(e.target.value)}
+                          />
+
+                          <button
+                            onClick={iniciarJogoTriviaIA}
+                            className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition active:scale-95"
+                          >
+                            🧠 Gerar Perguntas com IA para Todos
+                          </button>
+                        </div>
+                      )}
+
+                      {/* ECRÃ DE CARREGAMENTO DA IA */}
+                      {triviaCarregandoIA && (
+                        <div className="p-8 rounded-2xl bg-black/50 border border-amber-500/30 space-y-3">
+                          <div className="text-4xl animate-spin">🧠</div>
+                          <p className="text-xs font-black text-amber-400 uppercase tracking-widest">
+                            O Gemini está a criar as perguntas...
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Tema: "{triviaTemaInput || 'Cultura Geral'}"
+                          </p>
+                        </div>
+                      )}
+
+                      {/* ECRÃ DE PERGUNTAS DO TRIVIA */}
+                      {triviaPerguntas.length > 0 && !triviaPerdedor && (
+                        <div className="space-y-4 text-left">
+                          {triviaPerguntaIdx < triviaPerguntas.length ? (
+                            <div className="p-4 rounded-2xl bg-black/50 border border-amber-500/30 space-y-3">
+                              <div className="flex justify-between items-center text-xs font-black text-amber-400">
+                                <span>Pergunta {triviaPerguntaIdx + 1} de {triviaPerguntas.length}</span>
+                                <span className="bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-full text-white">⏱️ {triviaTempoRestante}s</span>
+                              </div>
+
+                              <p className="text-sm font-extrabold text-white leading-snug">
+                                {triviaPerguntas[triviaPerguntaIdx].pergunta}
+                              </p>
+
+                              <div className="grid grid-cols-1 gap-2 pt-1">
+                                {triviaPerguntas[triviaPerguntaIdx].opcoes.map((opcao: string, oIdx: number) => {
+                                  const jaRespondeu = !!minhaRespostaTrivia;
+                                  const eMinhaEscolha = minhaRespostaTrivia?.opcaoIdx === oIdx;
+
+                                  return (
+                                    <button
+                                      key={oIdx}
+                                      onClick={() => responderTrivia(oIdx)}
+                                      disabled={jaRespondeu}
+                                      className={`p-3 rounded-xl border text-xs font-bold text-left transition ${
+                                        eMinhaEscolha
+                                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-md'
+                                          : jaRespondeu
+                                            ? 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
+                                            : 'bg-slate-900/80 border-slate-700 text-slate-200 hover:border-amber-500'
+                                      }`}
+                                    >
+                                      <span className="mr-2 font-black opacity-60">[{String.fromCharCode(65 + oIdx)}]</span>
+                                      {opcao}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="pt-2 text-center">
+                                <button
+                                  onClick={avancarPerguntaTrivia}
+                                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 font-black text-xs transition border border-slate-700"
+                                >
+                                  ➡️ Próxima Pergunta
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="space-y-1.5 text-left pt-2">
+                            <p className="text-[10px] font-bold uppercase text-slate-400">Mesa Respondendo (Pergunta {triviaPerguntaIdx + 1}):</p>
+                            {presentesMesa.map(pId => {
+                              const pNome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
+                              const res = triviaRespostas.find(r => r.id === pId && r.perguntaIdx === triviaPerguntaIdx);
+                              return (
+                                <div key={pId} className="flex justify-between items-center text-xs p-2 rounded-lg bg-black/30 border border-slate-800">
+                                  <span className="font-bold">{pNome}</span>
+                                  {res ? (
+                                    <span className="text-emerald-400 font-bold">✅ Respondeu (+{res.pontos} pts)</span>
+                                  ) : (
+                                    <span className="text-amber-500/70 font-semibold italic animate-pulse">⏳ A pensar...</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {triviaPerdedor && (
+                        <div className="mt-4 p-5 rounded-2xl border text-center shadow-2xl bg-red-600 border-yellow-400 text-white animate-bounce">
+                          <p className="text-[10px] font-black uppercase tracking-widest opacity-80">
+                            🧠 MENOR PONTUAÇÃO DE CULTURA GERAL!
+                          </p>
+                          <h3 className="text-2xl font-black mt-1">🍺 {triviaPerdedor.nome} PAGA A RODADA!</h3>
+                          <p className="text-xs font-bold mt-1 opacity-90">
+                            Ficou em último lugar com apenas {triviaPerdedor.pontos} pontos!
+                          </p>
+                          <button onClick={iniciarJogoTriviaIA} className="mt-3 px-4 py-2 rounded-xl bg-black/30 hover:bg-black/50 font-black text-xs transition">🔄 Jogar Outra Vez</button>
                         </div>
                       )}
                     </>
