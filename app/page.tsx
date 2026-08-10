@@ -79,9 +79,9 @@ const MARCOS_GRUPO = [
 ];
 
 const TEMAS_RAPIDOS_TRIVIA = [
+  '⚽ Carreira de Jogadores',
   '🍺 Cerveja & Tascos',
   '⚽ Futebol Nacional',
-  '🎵 Música Anos 2000',
   '🎬 Cinema & Séries',
   '🇵🇹 Cultura Tuga'
 ];
@@ -2412,20 +2412,40 @@ export default function Home() {
                     </span>
                   </div>
 
-                  {/* IMAGEM REAL E FIXA PARA TODOS OS JOGADORES */}
-                  {triviaPerguntas[triviaPerguntaIdx].fotoUrl && (
-                    <div className="w-full aspect-video rounded-2xl overflow-hidden mb-4 border-2 border-amber-500/40 shadow-2xl relative bg-slate-900 flex items-center justify-center">
-                      <img 
-                        src={triviaPerguntas[triviaPerguntaIdx].fotoUrl} 
-                        alt="Pergunta Visual" 
-                        className="w-full h-full object-cover"
-                        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                      />
-                      <span className="absolute bottom-2 right-2 text-[8px] text-white/30 font-mono tracking-widest bg-black/50 px-1 rounded">
-                        {triviaPerguntas[triviaPerguntaIdx].keyword_imagem}
-                      </span>
-                    </div>
-                  )}
+                  {/* SE TIVER CARREIRA: MOSTRA CARTÃO DE CLUBES NO LUGAR DA FOTO */}
+{triviaPerguntas[triviaPerguntaIdx].carreira && triviaPerguntas[triviaPerguntaIdx].carreira.length > 0 ? (
+  <div className="w-full p-4 rounded-2xl border-2 border-amber-500/40 bg-slate-900/90 shadow-2xl mb-4 flex flex-col items-center justify-center space-y-1.5 min-h-[180px]">
+    <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-1 flex items-center gap-1">
+      ⚽ Histórico de Clubes
+    </span>
+    <div className="w-full space-y-1.5 max-h-48 overflow-y-auto pr-1">
+      {triviaPerguntas[triviaPerguntaIdx].carreira.map((clube: string, cIdx: number) => {
+        const partes = clube.split(':');
+        const epoc = partes[0] ? partes[0].trim() : '';
+        const nomeClube = partes[1] ? partes[1].trim() : clube;
+
+        return (
+          <div key={cIdx} className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-200 flex items-center justify-between shadow-sm">
+            <span className="text-amber-500 font-extrabold shrink-0 mr-2">{epoc}</span>
+            <span className="text-white truncate font-black text-right">{nomeClube}</span>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+) : (
+  /* CASO CONTRÁRIO: MOSTRA A FOTO NORMAL */
+  triviaPerguntas[triviaPerguntaIdx].fotoUrl && (
+    <div className="w-full aspect-video rounded-2xl overflow-hidden mb-4 border-2 border-amber-500/40 shadow-2xl relative bg-slate-900 flex items-center justify-center">
+      <img 
+        src={triviaPerguntas[triviaPerguntaIdx].fotoUrl} 
+        alt="Pergunta Visual" 
+        className="w-full h-full object-cover"
+        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+      />
+    </div>
+  )
+)}
 
                   <p className="text-base sm:text-lg font-extrabold text-white text-center leading-snug mb-5">
                     {triviaPerguntas[triviaPerguntaIdx].pergunta}

@@ -29,26 +29,42 @@ export async function POST(req: Request) {
     }
 
     const temaFinal = tema && tema.trim() !== '' ? tema.trim() : 'Cultura Geral, Futebol e Cerveja';
+    const eModoCarreira = temaFinal.toLowerCase().includes('carreira') || temaFinal.toLowerCase().includes('jogador');
 
-    const prompt = `Gera exatamente 10 perguntas cómicas e desafiantes de escolha múltipla em Português de Portugal sobre o tema: "${temaFinal}".
+    const prompt = `Gera exatamente 10 perguntas de escolha múltipla em Português de Portugal sobre o tema: "${temaFinal}".
 
-Cria um MISTO entre dois tipos de perguntas:
-1. PERGUNTAS DE RECONHECIMENTO VISUAL: ex: "Que estádio/lugar/pessoa é este na imagem?". Neste caso, o "termo_wikipedia" é o próprio objeto a adivinhar.
-2. PERGUNTAS DE CONTEXTO: ex: "Qual o doce típico de Aveiro?". NESTE CASO, O "termo_wikipedia" DEVE SER O CONTEXTO/CIDADE (ex: "Aveiro" ou "Estádio Municipal de Aveiro") E NUNCA A RESPOSTA CORRETA ("Ovos Moles"), PARA NÃO DAR SPOILER DAS OPÇÕES!
+${eModoCarreira ? `
+MODO CARREIRA DE JOGADORES:
+- Todas as perguntas devem ser para adivinhar o jogador através da sua lista de clubes.
+- A "pergunta" deve ser simplesmente "A que jogador pertence esta carreira de clubes?".
+- Fornece no campo "carreira" um array de strings com o histórico ordenado por épocas (ex: ["2001–2003: Sporting CP", "2003–2009: Manchester United", "2009–2018: Real Madrid"]).
+- O campo "termo_wikipedia" pode ir vazio/null.
+` : `
+REGRAS GERAIS:
+- Cria um MISTO entre perguntas normais, de imagem e de carreira.
+- Se a pergunta for de carreira, mete a pergunta curta "A que jogador pertence esta carreira?", fornece a lista no array "carreira" e mete "termo_wikipedia": null.
+- Se for uma pergunta normal/visual, o campo "carreira" deve ser null.
+`}
 
 Para cada pergunta, fornece OBRIGATORIAMENTE:
 1. "pergunta": Texto da pergunta.
-2. "opcoes": Array com 4 opções de resposta.
-3. "correta": Índice numérico (0 a 3) da resposta correta.
-4. "termo_wikipedia": O termo exato em Português para buscar na Wikipédia.
+2. "carreira": Array de strings com a carreira do jogador (ou null se for pergunta normal).
+3. "opcoes": Array com 4 opções de resposta.
+4. "correta": Índice numérico (0 a 3) da resposta correta.
+5. "termo_wikipedia": Termo da Wikipédia para foto (ou null se for de carreira).
 
 Responde APENAS no seguinte formato JSON, sem crases markdown, sem texto adicional:
 [
   {
-    "pergunta": "Se fores ao Estádio Municipal de Aveiro, qual é a iguaria doce local para afogar as mágoas?",
-    "opcoes": ["Ovos moles de Aveiro", "Torta de Azeitão", "Queijada de Sintra", "Pastel de Nata"],
+    "pergunta": "A que jogador pertence esta carreira?",
+    "carreira": [
+      "2001–2003: Sporting CP",
+      "2003–2004: Barcelona",
+      "2004–2007: FC Porto"
+    ],
+    "opcoes": ["Ricardo Quaresma", "Cristiano Ronaldo", "Luís Figo", "Simão Sabrosa"],
     "correta": 0,
-    "termo_wikipedia": "Estádio Municipal de Aveiro"
+    "termo_wikipedia": null
   }
 ]`;
 
@@ -81,11 +97,13 @@ Responde APENAS no seguinte formato JSON, sem crases markdown, sem texto adicion
 
     const perguntas = await Promise.all(
       rawPerguntas.map(async (p: any, idx: number) => {
-        let fotoUrl = await obterFotoWikipedia(p.termo_wikipedia);
-
-        if (!fotoUrl) {
-          const kw = p.termo_wikipedia ? encodeURIComponent(p.termo_wikipedia.split(' ')[0].toLowerCase()) : 'food';
-          fotoUrl = `https://loremflickr.com/800/600/${kw}?lock=${seedJogo + idx}`;
+        let fotoUrl = null;
+        if (p.termo_wikipedia) {
+          fotoUrl = await obterFotoWikipedia(p.termo_wikipedia);
+          if (!fotoUrl) {
+            const kw = encodeURIComponent(p.termo_wikipedia.split(' ')[0].toLowerCase());
+            fotoUrl = `https://loremflickr.com/800/600/${kw}?lock=${seedJogo + idx}`;
+          }
         }
 
         return {
