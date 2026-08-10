@@ -12,18 +12,25 @@ export async function POST(req: Request) {
       );
     }
 
-    const temaFinal = tema && tema.trim() !== '' ? tema.trim() : 'Cultura Geral e Cerveja';
+    const temaFinal = tema && tema.trim() !== '' ? tema.trim() : 'Cultura Geral e Futebol';
 
+    // Pedimos à IA uma "keyword_imagem" exata em inglês para usar no Unsplash
     const prompt = `Gera exatamente 10 perguntas cómicas e desafiantes de escolha múltipla em Português de Portugal sobre o tema: "${temaFinal}".
-Cada pergunta deve ter rigorosamente 4 opções de resposta, o índice numérico (0 a 3) da resposta correta e, se o tema/pergunta envolver identificação visual (animais, monumentos, logótipos, personalidades, etc.), inclui um URL de imagem no campo "imagemUrl" (usa o serviço LoremFlickr no formato "https://loremflickr.com/500/350/<palavra_chave_em_ingles>"). Se não necessitar de imagem, define "imagemUrl" como null.
+Podes incluir perguntas em que a imagem é a peça central (ex: "Que animal é este?", "De que jogador/equipa é esta carreira?", "Que monumento ou lugar é este?").
 
-Responde APENAS no seguinte formato JSON sem qualquer texto adicional:
+Para cada pergunta, fornece rigorosamente:
+1. "pergunta": Texto da pergunta.
+2. "opcoes": Array com 4 opções de resposta.
+3. "correta": Índice numérico (0 a 3) da resposta correta.
+4. "keyword_imagem": 1 ou 2 palavras-chave muito específicas em INGLÊS que identifiquem a imagem exata da pergunta (ex: "cristiano ronaldo", "golden retriever", "eiffel tower", "beer pint", "fc porto"). Se a pergunta for abstrata, dá uma keyword que combine.
+
+Responde APENAS no seguinte formato JSON, sem crases, sem texto adicional:
 [
   {
-    "pergunta": "Texto da pergunta?",
-    "opcoes": ["Opção A", "Opção B", "Opção C", "Opção D"],
+    "pergunta": "Que jogador corresponde a esta carreira?",
+    "opcoes": ["Sporting CP", "SL Benfica", "FC Porto", "SC Braga"],
     "correta": 0,
-    "imagemUrl": "https://loremflickr.com/500/350/dog"
+    "keyword_imagem": "sporting cp"
   }
 ]`;
 
@@ -51,7 +58,21 @@ Responde APENAS no seguinte formato JSON sem qualquer texto adicional:
       throw new Error('Resposta vazia da IA');
     }
 
-    const perguntas = JSON.parse(textResponse);
+    const rawPerguntas = JSON.parse(textResponse);
+    const seedJogo = Date.now(); // Semente única para esta rodada de 10 perguntas
+
+    // Mapear perguntas e injetar o link fixo do Unsplash
+    const perguntas = rawPerguntas.map((p: any, idx: number) => {
+      const kw = p.keyword_imagem ? encodeURIComponent(p.keyword_imagem.trim().toLowerCase()) : 'question';
+      // Unsplash usa o parâmetro sig para garantir a mesma imagem para a mesma keyword no mesmo momento
+      const fotoUrl = `https://source.unsplash.com/800x600/?${kw}&sig=${seedJogo + idx}`;
+
+      return {
+        ...p,
+        fotoUrl
+      };
+    });
+
     return NextResponse.json({ perguntas });
   } catch (err: any) {
     console.error('Erro na Rota de Trivia:', err);
