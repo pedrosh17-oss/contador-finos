@@ -1251,7 +1251,9 @@ export default function Home() {
       });
 
       const data = await res.json();
-      if (data.error || !data.perguntas) throw new Error(data.error || 'Erro ao gerar');
+      if (!res.ok || data.error || !data.perguntas) {
+        throw new Error(data.error || 'Erro ao gerar perguntas');
+      }
 
       setTriviaPerguntas(data.perguntas);
       setTriviaPerguntaIdx(0);
@@ -1265,7 +1267,7 @@ export default function Home() {
         payload: { perguntas: data.perguntas, jogadores: presentesMesa }
       });
     } catch (e: any) {
-      mostrarToast('Falha na IA do Gemini. Tenta outro tema!', 'erro');
+      mostrarToast(e.message || 'Falha na IA do Gemini.', 'erro');
     } finally {
       setTriviaCarregandoIA(false);
     }
