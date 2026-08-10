@@ -6,9 +6,9 @@ import { supabase } from '../lib/supabase';
 // ==========================================
 // ⚙️ CONFIGURAÇÃO RÁPIDA
 // ==========================================
-const TOTAL_GIFS = 1;                     // 👈 Número total de stickers em public/gifs/
-const META_FESTA_DIARIA = 20;              // 🎯 Aos 20 finos diários arranca o caos!
-const DATA_INICIO_PROJETO = '2026-08-05';   // 📅 Data oficial de arranque do contador
+const TOTAL_GIFS = 1;                     
+const META_FESTA_DIARIA = 20;              
+const DATA_INICIO_PROJETO = '2026-08-05';   
 
 // 🏷️ TÍTULOS OFICIAIS DO RANKING
 const TITULOS_RANKING = [
@@ -203,6 +203,72 @@ function formatarFinos(val: number): string {
   return num % 1 === 0 ? num.toString() : num.toFixed(1);
 }
 
+// ==========================================
+// 👑 LÓGICA DE MEDALHAS HISTÓRICAS
+// ==========================================
+function obterAnoSemana(d: Date) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(),0,1));
+  const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1)/7);
+  return `${date.getUTCFullYear()}-W${weekNo}`;
+}
+
+function obterAnoMes(d: Date) {
+  return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}`;
+}
+
+function calcularCampeoesHistoricos(finosList: any[]) {
+  const hoje = new Date();
+  const semanaAtual = obterAnoSemana(hoje);
+  const mesAtual = obterAnoMes(hoje);
+
+  const semanas: Record<string, { [id: string]: number }> = {};
+  const meses: Record<string, { [id: string]: number }> = {};
+
+  finosList.forEach(f => {
+    if (f.tipo_bebida === 'gregorio') return;
+    const d = new Date(f.data_hora);
+    const wk = obterAnoSemana(d);
+    const ms = obterAnoMes(d);
+    const val = f.quantidade_equivalente ?? 1;
+    
+    // Ignorar semana/meses em curso
+    if (wk !== semanaAtual) {
+      if (!semanas[wk]) semanas[wk] = {};
+      semanas[wk][f.perfil_id] = (semanas[wk][f.perfil_id] || 0) + val;
+    }
+    if (ms !== mesAtual) {
+      if (!meses[ms]) meses[ms] = {};
+      meses[ms][f.perfil_id] = (meses[ms][f.perfil_id] || 0) + val;
+    }
+  });
+
+  const vitoriasSemana: Record<string, number> = {};
+  const vitoriasMes: Record<string, number> = {};
+
+  Object.values(semanas).forEach(contagens => {
+    let max = 0; let vencedores: string[] = [];
+    for (const [id, count] of Object.entries(contagens)) {
+      if (count > max) { max = count; vencedores = [id]; }
+      else if (count === max && count > 0) vencedores.push(id);
+    }
+    if (max > 0) vencedores.forEach(id => { vitoriasSemana[id] = (vitoriasSemana[id] || 0) + 1; });
+  });
+
+  Object.values(meses).forEach(contagens => {
+    let max = 0; let vencedores: string[] = [];
+    for (const [id, count] of Object.entries(contagens)) {
+      if (count > max) { max = count; vencedores = [id]; }
+      else if (count === max && count > 0) vencedores.push(id);
+    }
+    if (max > 0) vencedores.forEach(id => { vitoriasMes[id] = (vitoriasMes[id] || 0) + 1; });
+  });
+
+  return { vitoriasSemana, vitoriasMes };
+}
+
 export default function Home() {
   const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'perfil' | 'rodada' | 'mapa' | 'feitos' | 'historico'>('inicio');
   const [toast, setToast] = useState<{msg: string, tipo: 'erro' | 'sucesso'} | null>(null);
@@ -216,7 +282,6 @@ export default function Home() {
   const [novoNome, setNovoNome] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // MODO DE REGISTO EM INÍCIO: INDIVIDUAL OU RODADA
   const [modoRegisto, setModoRegisto] = useState<'individual' | 'rodada'>('individual');
   const [bebedoresRodada, setBebedoresRodada] = useState<string[]>([]);
 
@@ -232,18 +297,16 @@ export default function Home() {
   const [fighter1, setFighter1] = useState<string>('');
   const [fighter2, setFighter2] = useState<string>('');
 
-  // SORTEADOR
   const [presentesMesa, setPresentesMesa] = useState<string[]>([]);
   const [isSorteandoRodada, setIsSorteandoRodada] = useState(false);
   const [roletaRodadaId, setRoletaRodadaId] = useState<string | null>(null);
   const [vitimaRodada, setVitimaRodada] = useState<any | null>(null);
 
-  // ABA PERFIL (FICHA MÉDICA)
   const [perfilSelecionadoId, setPerfilSelecionadoId] = useState<string>('');
   const [seletorPerfilAberto, setSeletorPerfilAberto] = useState(false);
 
-  // REFERÊNCIA DO MAPA
   const mapRef = useRef<any>(null);
+  const clusterGroupRef = useRef<any>(null);
 
   useEffect(() => {
     fetchDados();
@@ -257,16 +320,8 @@ export default function Home() {
 
     const canalRealtime = supabase
       .channel('tempo-real-finos')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'finos' },
-        () => { fetchDados(); }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'perfis' },
-        () => { fetchDados(); }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'finos' }, () => { fetchDados(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'perfis' }, () => { fetchDados(); })
       .subscribe();
 
     return () => {
@@ -280,45 +335,80 @@ export default function Home() {
     }
   }, [selectedUser]);
 
-  // 🗺️ EFEITO DE CARREGAMENTO DO MAPA DE CALOR LEAFLET
+  // 🗺️ MAPA DE CLUSTERS DE EMOJIS LEAFLET
   useEffect(() => {
     if (abaAtiva === 'mapa' && typeof window !== 'undefined') {
       const L = (window as any).L;
-      if (!L) return;
+      if (!L || !L.markerClusterGroup) return;
 
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
+      if (!mapRef.current) {
+        const map = L.map('mapa-calor-container').setView([41.1579, -8.6291], 6);
+        mapRef.current = map;
 
-      const pontosCoordenadas = finos
-        .filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio')
-        .map(f => [Number(f.lat), Number(f.lng), (f.quantidade_equivalente ?? 1) * 0.5]);
-
-      const centroInicial = pontosCoordenadas.length > 0
-        ? [pontosCoordenadas[0][0], pontosCoordenadas[0][1]]
-        : [41.1579, -8.6291];
-
-      const map = L.map('mapa-calor-container').setView(centroInicial, 12);
-      mapRef.current = map;
-
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-        subdomains: 'abcd',
-        maxZoom: 19
-      }).addTo(map);
-
-      if (pontosCoordenadas.length > 0 && L.heatLayer) {
-        L.heatLayer(pontosCoordenadas, {
-          radius: 25,
-          blur: 15,
-          maxZoom: 17,
-          gradient: { 0.4: 'blue', 0.65: 'lime', 0.8: 'yellow', 1.0: 'red' }
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap',
+          subdomains: 'abcd',
+          maxZoom: 19
         }).addTo(map);
 
-        const bounds = L.latLngBounds(pontosCoordenadas.map((p: any) => [p[0], p[1]]));
-        map.fitBounds(bounds, { padding: [30, 30] });
+        clusterGroupRef.current = L.markerClusterGroup({
+          iconCreateFunction: function(cluster: any) {
+            const count = cluster.getChildCount();
+            
+            let dim = 'w-11 h-11';
+            let numSize = 'text-xs';
+            
+            if (count > 10) {
+              dim = 'w-12 h-12';
+              numSize = 'text-sm';
+            }
+            if (count > 50) {
+              dim = 'w-14 h-14 shadow-[0_0_20px_rgba(245,158,11,0.9)]';
+              numSize = 'text-base';
+            }
+
+            const html = `
+              <div class="${dim} bg-amber-500 rounded-full border-2 border-white flex flex-col items-center justify-center font-black text-slate-950 shadow-lg">
+                <span class="${numSize} leading-none mb-0.5">${count}</span>
+                <span class="text-[10px] leading-none">🍺</span>
+              </div>
+            `;
+
+            return L.divIcon({ 
+              html: html, 
+              className: 'bg-transparent border-0', 
+              iconSize: [48, 48],
+              iconAnchor: [24, 24]
+            });
+          }
+        });
+
+        map.addLayer(clusterGroupRef.current);
       }
+
+      clusterGroupRef.current.clearLayers();
+
+      const pontosValidos = finos.filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio');
+      
+      pontosValidos.forEach(f => {
+        const customIcon = L.divIcon({
+          html: `<div class="text-2xl drop-shadow-md">🍺</div>`,
+          className: 'bg-transparent border-0',
+          iconSize: [30, 30],
+          iconAnchor: [15, 15]
+        });
+        
+        const marker = L.marker([f.lat, f.lng], { icon: customIcon });
+        marker.bindPopup(`<b>${f.perfis?.nome || 'Alguém'}</b> bebeu aqui!`);
+        clusterGroupRef.current.addLayer(marker);
+      });
+
+      if (pontosValidos.length > 0) {
+        const bounds = L.latLngBounds(pontosValidos.map((p: any) => [p.lat, p.lng]));
+        mapRef.current.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+      }
+
+      setTimeout(() => { mapRef.current?.invalidateSize(); }, 200);
     }
   }, [abaAtiva, finos]);
 
@@ -352,29 +442,10 @@ export default function Home() {
 
   async function fetchDados() {
     const { data: dataPerfis } = await supabase.from('perfis').select('*');
-    const { data: dataFinos } = await supabase
-      .from('finos')
-      .select('*, perfis(nome)')
-      .order('data_hora', { ascending: false });
+    const { data: dataFinos } = await supabase.from('finos').select('*, perfis(nome)').order('data_hora', { ascending: false });
 
     if (dataPerfis) setPerfis(dataPerfis);
-    if (dataFinos) {
-      setFinos(dataFinos);
-      if (dataFinos.length > 0) {
-        const primeiroDia = new Date(dataFinos[0].data_hora).toLocaleDateString('pt-PT');
-        setDiasAbertos((prev) => ({ ...prev, [primeiroDia]: true }));
-      }
-      
-      dataPerfis?.forEach(p => {
-        const pFinos = dataFinos.filter(f => f.perfil_id === p.id && f.tipo_bebida !== 'gregorio');
-        if (pFinos.length > 0) {
-          const ultimoFinoMs = new Date(pFinos[0].data_hora).getTime();
-          if (Date.now() - ultimoFinoMs >= 7 * 86400000 && Date.now() - ultimoFinoMs <= 7 * 86400000 + 60000) {
-            enviarNotificacao('🧼 ALERTA CONAS DE SABÃO!', `${p.nome} está há 1 semana sem beber.`);
-          }
-        }
-      });
-    }
+    if (dataFinos) setFinos(dataFinos);
   }
 
   function tocarSomEVibrar() {
@@ -416,26 +487,7 @@ export default function Home() {
   const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
 
   const finosSemana = finosValidos.filter(f => new Date(f.data_hora) >= inicioSemana);
-  const contagemSemana: { [key: string]: number } = {};
-  finosSemana.forEach(f => {
-    contagemSemana[f.perfil_id] = (contagemSemana[f.perfil_id] || 0) + (f.quantidade_equivalente ?? 1);
-  });
-  let campeaoSemanaId = '';
-  let maxSemana = 0;
-  for (const [id, count] of Object.entries(contagemSemana)) {
-    if (count > maxSemana) { maxSemana = count; campeaoSemanaId = id; }
-  }
-
   const finosMes = finosValidos.filter(f => new Date(f.data_hora) >= inicioMes);
-  const contagemMes: { [key: string]: number } = {};
-  finosMes.forEach(f => {
-    contagemMes[f.perfil_id] = (contagemMes[f.perfil_id] || 0) + (f.quantidade_equivalente ?? 1);
-  });
-  let campeaoMesId = '';
-  let maxMes = 0;
-  for (const [id, count] of Object.entries(contagemMes)) {
-    if (count > maxMes) { maxMes = count; campeaoMesId = id; }
-  }
 
   const finosExibidos = abaRanking === 'semanal' ? finosSemana : finosValidos;
   const totalFinosEq = finosExibidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
@@ -461,10 +513,8 @@ export default function Home() {
       script.onload = () => {
         const confetti = (window as any).confetti;
         if (!confetti) return;
-        
         const particleCount = isModoFesta ? 200 : 80;
         const spread = isModoFesta ? 180 : 100;
-        
         confetti({ particleCount, spread, origin: { y: 0.6 }, colors: ['#ff0055', '#00e5ff', '#ffaa00', '#ffffff', '#b45309'] });
         const scalar = 2;
         const beerEmoji = confetti.shapeFromText({ text: '🍺', scalar });
@@ -476,20 +526,14 @@ export default function Home() {
     }
   }
 
-  // REGISTAR FINO INDIVIDUAL OU RODADA COMPLETA (COM GPS)
   async function registarFino(e: React.ChangeEvent<HTMLInputElement>) {
     if (!selectedUser) { mostrarToast('Seleciona o teu nome na lista primeiro! 🍺', 'erro'); return; }
-    
-    if (modoRegisto === 'rodada' && bebedoresRodada.length === 0) {
-      mostrarToast('Seleciona pelo menos 1 amigo que bebeu na rodada!', 'erro');
-      return;
-    }
+    if (modoRegisto === 'rodada' && bebedoresRodada.length === 0) { mostrarToast('Seleciona pelo menos 1 amigo que bebeu na rodada!', 'erro'); return; }
 
     try {
       setLoading(true);
       const file = e.target.files?.[0];
       let photoUrl: string | null = null;
-
       const coords = await obterLocalizacaoGPS();
 
       if (file) {
@@ -505,24 +549,12 @@ export default function Home() {
 
       if (modoRegisto === 'individual') {
         await supabase.from('finos').insert([{ 
-          perfil_id: selectedUser, 
-          foto_url: photoUrl,
-          tipo_bebida: tipoBebidaSelecionado,
-          quantidade_equivalente: bebidaInfo.equivalencia,
-          lat: coords.lat,
-          lng: coords.lng
+          perfil_id: selectedUser, foto_url: photoUrl, tipo_bebida: tipoBebidaSelecionado, quantidade_equivalente: bebidaInfo.equivalencia, lat: coords.lat, lng: coords.lng
         }]);
       } else {
         const listaInserir = bebedoresRodada.map(pId => ({
-          perfil_id: pId,
-          foto_url: photoUrl,
-          tipo_bebida: tipoBebidaSelecionado,
-          quantidade_equivalente: bebidaInfo.equivalencia,
-          pagador_id: selectedUser,
-          lat: coords.lat,
-          lng: coords.lng
+          perfil_id: pId, foto_url: photoUrl, tipo_bebida: tipoBebidaSelecionado, quantidade_equivalente: bebidaInfo.equivalencia, pagador_id: selectedUser, lat: coords.lat, lng: coords.lng
         }));
-
         await supabase.from('finos').insert(listaInserir);
       }
       
@@ -536,49 +568,22 @@ export default function Home() {
           enviarNotificacao('🎂 É PARABÉNS:', `${nomeUser} recusa-se a ir dormir e acabou de registar mais uma bebida. Já passa das 3 da manhã…`);
         } else {
           const finosHojeUser = (finosPorDataStr[hojeStrLocal] || []).filter(f => f.perfil_id === selectedUser).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0) + bebidaInfo.equivalencia;
-          if (finosHojeUser >= 5) {
-            enviarNotificacao('🔥 EM CHAMA!', `${nomeUser} vai no equivalente a ${formatarFinos(finosHojeUser)} finos hoje. Já deve tar meio pêssego`);
-          } else {
-            enviarNotificacao('🍺 LÁ VAI ELE!', `${nomeUser} fodeu as beiças a mais uma bebida!`);
-          }
+          if (finosHojeUser >= 5) enviarNotificacao('🔥 EM CHAMA!', `${nomeUser} vai no equivalente a ${formatarFinos(finosHojeUser)} finos hoje. Já deve tar meio pêssego`);
+          else enviarNotificacao('🍺 LÁ VAI ELE!', `${nomeUser} fodeu as beiças a mais uma bebida!`);
         }
       }
 
-      if (contagemPorPessoa.length >= 2 && selectedUser !== contagemPorPessoa[0].id) {
-        const minhaPosicaoAntes = contagemPorPessoa.findIndex(p => p.id === selectedUser);
-        const meuTotalNovo = contagemPorPessoa[minhaPosicaoAntes].count + bebidaInfo.equivalencia;
-        if (minhaPosicaoAntes > 0 && meuTotalNovo > contagemPorPessoa[minhaPosicaoAntes - 1].count) {
-          const ultrapassado = contagemPorPessoa[minhaPosicaoAntes - 1].nome;
-          enviarNotificacao('🚨 ALERTA DE GOLPE DE ESTADO!', `${nomeUser} subiu na tabela e fodeu o lugar ao ${ultrapassado}! Você é pika! Você é o cara!`);
-        }
-      }
-
-      if (proximoMarco && (totalFinosGeralEq + bebidaInfo.equivalencia) >= proximoMarco.meta) {
-        enviarNotificacao('🏆 GRANDE FEITO ALCANÇADO!', `O grupo atingiu a meta equivalente a ${proximoMarco.meta} finos!`);
-      }
-      
       dispararCelebracao();
-      
       const frasesRandom = isModoFesta ? MENSAGENS_FESTA : MENSAGENS_DIVERTIDAS;
       const textoSorteado = frasesRandom[Math.floor(Math.random() * frasesRandom.length)];
       
       let gifSorteado: string | null = null;
-      if (TOTAL_GIFS > 0) {
-        const numRandom = Math.floor(Math.random() * TOTAL_GIFS) + 1;
-        gifSorteado = `/gifs/${numRandom}.webp`;
-      }
+      if (TOTAL_GIFS > 0) gifSorteado = `/gifs/${Math.floor(Math.random() * TOTAL_GIFS) + 1}.webp`;
 
-      setMensagemModal({ 
-        texto: modoRegisto === 'rodada' 
-          ? `💳 Rodada registada! Pagante: ${perfis.find(p=>p.id===selectedUser)?.nome}` 
-          : textoSorteado, 
-        gifUrl: gifSorteado 
-      });
-
+      setMensagemModal({ texto: modoRegisto === 'rodada' ? `💳 Rodada registada! Pagante: ${perfis.find(p=>p.id===selectedUser)?.nome}` : textoSorteado, gifUrl: gifSorteado });
       setBebedoresRodada([]);
       fetchDados();
     } catch (err) {
-      console.error(err);
       mostrarToast('Erro ao guardar. Verifica a net.', 'erro');
     } finally {
       setLoading(false);
@@ -600,7 +605,6 @@ export default function Home() {
       await supabase.from('finos').insert([{ perfil_id: selectedUser, tipo_bebida: 'gregorio', quantidade_equivalente: 0 }]);
       const nomeVomitador = perfis.find(p => p.id === selectedUser)?.nome || 'Alguém';
       enviarNotificacao('🤮 TEMOS HOMEM AO MAR!', `${nomeVomitador} gregou-se todo! A reputação desceu!`);
-      
       mostrarToast('Fizeste mau registado! A tua reputação desceu! 🤮', 'sucesso');
       fetchDados();
     } catch (err) { mostrarToast('Erro ao registar.', 'erro'); } finally { setLoading(false); }
@@ -611,11 +615,18 @@ export default function Home() {
     setModalGregorioOpen(true);
   }
 
+  // 🥇 MEDALHAS PERMANENTES (HISTÓRICO DE SEMANAS/MESES PASSADOS)
+  const historicoCampeoes = calcularCampeoesHistoricos(finos);
+
   function calcularConquistas(userFinosValidos: any[], userId: string) {
     const list: string[] = [];
     
-    if (userId === campeaoSemanaId && maxSemana > 0) list.push('👑 Campeão da Semana');
-    if (userId === campeaoMesId && maxMes > 0) list.push('🏆 Campeão do Mês');
+    // Adicionar medalhas permanentes
+    const vitsSemana = historicoCampeoes.vitoriasSemana[userId] || 0;
+    const vitsMes = historicoCampeoes.vitoriasMes[userId] || 0;
+    
+    if (vitsSemana > 0) list.push(`👑 Campeão da Semana (x${vitsSemana})`);
+    if (vitsMes > 0) list.push(`🏆 Campeão do Mês (x${vitsMes})`);
 
     const rodadasPagas = finos.filter(f => f.pagador_id === userId).length;
     if (rodadasPagas > 0) {
@@ -625,9 +636,7 @@ export default function Home() {
 
     const umaSemanaAtrasMs = Date.now() - 7 * 86400000;
     const bebeuNaUltimaSemana = userFinosValidos.some(f => new Date(f.data_hora).getTime() >= umaSemanaAtrasMs);
-    if (!bebeuNaUltimaSemana && userFinosValidos.length > 0) {
-      list.push('🌵 Deserto');
-    }
+    if (!bebeuNaUltimaSemana && userFinosValidos.length > 0) list.push('🌵 Deserto');
 
     if (!userFinosValidos || userFinosValidos.length === 0) return list;
     if (userFinosValidos.some((f) => { const h = new Date(f.data_hora).getHours(); return h >= 6 && h < 13; })) list.push('🌅 Madrugador');
@@ -652,12 +661,9 @@ export default function Home() {
     return list;
   }
 
-  // RANKING ABSOLUTO / GERAL
   const rankingAbsoluto = perfis
     .map((p) => {
-      const countGeral = finosValidos
-        .filter((f) => f.perfil_id === p.id)
-        .reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
+      const countGeral = finosValidos.filter((f) => f.perfil_id === p.id).reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
       return { ...p, countGeral };
     })
     .sort((a, b) => b.countGeral - a.countGeral);
@@ -669,7 +675,6 @@ export default function Home() {
       const userFinosGeral = finos.filter((f) => f.perfil_id === p.id);
       const userFinosValidos = finosValidos.filter((f) => f.perfil_id === p.id);
       const userFinosFiltrados = finosExibidos.filter((f) => f.perfil_id === p.id);
-      
       const count = userFinosFiltrados.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
       const gregorios = userFinosGeral.filter(f => f.tipo_bebida === 'gregorio').length;
       const conquistas = calcularConquistas(userFinosValidos, p.id);
@@ -683,8 +688,7 @@ export default function Home() {
         else if (h >= 12 && h < 18) periodos['Tarde'] += val;
         else periodos['Noite'] += val;
       });
-      let periodoForte = '';
-      let maxP = 0;
+      let periodoForte = ''; let maxP = 0;
       for (const [k, v] of Object.entries(periodos)) {
         if (v > maxP && v > 0) { maxP = v; periodoForte = k; }
       }
@@ -693,10 +697,12 @@ export default function Home() {
     })
     .sort((a, b) => b.count - a.count);
 
+  // CÁLCULO DE STREAKS TOLERANTES (ESPERA PELO FINAL DO DIA)
   const statsStreaks = perfis.map(p => {
     const pFinos = finosValidos.filter(f => f.perfil_id === p.id);
     const diasUnicosMs = Array.from(new Set(pFinos.map(f => new Date(f.data_hora).setHours(0, 0, 0, 0)))).sort((a, b) => a - b);
     let maxS = 0, curS = 0, tempS = 0, lastMs: number | null = null;
+    
     diasUnicosMs.forEach(diaMs => {
       if (lastMs === null) { tempS = 1; } else {
         const diffDays = Math.round((diaMs - lastMs) / 86400000);
@@ -705,9 +711,12 @@ export default function Home() {
       if (tempS > maxS) maxS = tempS;
       lastMs = diaMs;
     });
+
     if (diasUnicosMs.length > 0) {
       const lastDayMs = diasUnicosMs[diasUnicosMs.length - 1];
-      if (lastDayMs === hojeMs || lastDayMs === ontemMs) curS = tempS; else curS = 0;
+      // Se não bebeu hoje nem ontem, foi a zero. Se bebeu ontem, mantém o streak à espera do copo de hoje.
+      if (lastDayMs === hojeMs || lastDayMs === ontemMs) curS = tempS; 
+      else curS = 0;
     }
     return { id: p.id, nome: p.nome, maxStreak: maxS, currentStreak: curS };
   });
@@ -748,56 +757,27 @@ export default function Home() {
     });
     if (countDiff > 0) ritmoUsers.push({ id: p.id, nome: p.nome, paceMin: Math.round((totalDiff / countDiff) / 60000) });
   });
-  ritmoUsers.sort((a, b) => a.paceMin - b.paceMin);
-
-  function getFighterStats(id: string) {
-    const pCount = contagemPorPessoa.find(p => p.id === id)?.count || 0;
-    const pStreak = statsStreaks.find(s => s.id === id)?.maxStreak || 0;
-    const pRitmo = ritmoUsers.find(r => r.id === id)?.paceMin || Infinity;
-    return { count: pCount, streak: pStreak, ritmo: pRitmo };
-  }
-  
-  const f1Stats = fighter1 ? getFighterStats(fighter1) : null;
-  const f2Stats = fighter2 ? getFighterStats(fighter2) : null;
 
   // LÓGICA DO SORTEADOR DA RODADA
-  const toggleMesa = (id: string) => {
-    setPresentesMesa(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]);
-  };
-
-  const toggleBebedorRodada = (id: string) => {
-    setBebedoresRodada(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]);
-  };
-
+  const toggleMesa = (id: string) => { setPresentesMesa(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]); };
+  const toggleBebedorRodada = (id: string) => { setBebedoresRodada(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]); };
   const selecionarTodosMesa = () => setPresentesMesa(perfis.map(p => p.id));
   const limparMesa = () => setPresentesMesa([]);
 
   function sortearQuemPaga() {
-    if (presentesMesa.length < 2) {
-      mostrarToast('Seleciona pelo menos 2 pessoas na mesa! 🍻', 'erro');
-      return;
-    }
-    setIsSorteandoRodada(true);
-    setVitimaRodada(null);
-    
-    let voltas = 0;
-    const maxVoltas = 15 + Math.floor(Math.random() * 10);
-    let currentIdx = 0;
+    if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa! 🍻', 'erro'); return; }
+    setIsSorteandoRodada(true); setVitimaRodada(null);
+    let voltas = 0; const maxVoltas = 15 + Math.floor(Math.random() * 10); let currentIdx = 0;
 
     const tick = () => {
       const idAtual = presentesMesa[currentIdx];
-      setRoletaRodadaId(idAtual);
-      voltas++;
-
+      setRoletaRodadaId(idAtual); voltas++;
       if (voltas < maxVoltas) {
         currentIdx = (currentIdx + 1) % presentesMesa.length;
-        const delay = 50 + (voltas * voltas * 0.8);
-        setTimeout(tick, delay);
+        setTimeout(tick, 50 + (voltas * voltas * 0.8));
       } else {
-        const perfilSorteado = perfis.find(p => p.id === idAtual);
-        setVitimaRodada(perfilSorteado);
-        setIsSorteandoRodada(false);
-        dispararCelebracao();
+        setVitimaRodada(perfis.find(p => p.id === idAtual));
+        setIsSorteandoRodada(false); dispararCelebracao();
       }
     };
     tick();
@@ -811,15 +791,19 @@ export default function Home() {
     return acc;
   }, {});
 
-  // CÁLCULOS DA ABA DE PERFIL DO UTILIZADOR SELECIONADO
+  // CÁLCULOS DA ABA DE PERFIL
   const perfilAtualObj = perfis.find(p => p.id === perfilSelecionadoId);
   const userFinosValidosAtual = finosValidos.filter(f => f.perfil_id === perfilSelecionadoId);
   const totalUserEqAtual = userFinosValidosAtual.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
   const litrosNoSangueAtual = (totalUserEqAtual * 0.20).toFixed(1);
   const percentualColoGrupo = totalFinosGeralEq > 0 ? ((totalUserEqAtual / totalFinosGeralEq) * 100).toFixed(1) : '0.0';
-  const melhorStreakAtual = statsStreaks.find(s => s.id === perfilSelecionadoId)?.maxStreak || 0;
-  const conquistasAtual = perfilSelecionadoId ? calcularConquistas(userFinosValidosAtual, perfilSelecionadoId) : [];
   
+  const statsUser = statsStreaks.find(s => s.id === perfilSelecionadoId);
+  const melhorStreakAtual = statsUser?.maxStreak || 0;
+  const streakVivoAtual = statsUser?.currentStreak || 0;
+  const mediaFinosPorDia = (totalUserEqAtual / diaDoProjeto).toFixed(1);
+
+  const conquistasAtual = perfilSelecionadoId ? calcularConquistas(userFinosValidosAtual, perfilSelecionadoId) : [];
   const posGeralIndex = rankingAbsoluto.findIndex(p => p.id === perfilSelecionadoId);
   const tituloOficialAtual = posGeralIndex !== -1 ? (TITULOS_RANKING[posGeralIndex] || TITULOS_RANKING[TITULOS_RANKING.length - 1]) : '-';
 
@@ -836,13 +820,11 @@ export default function Home() {
     else if (h >= 12 && h < 18) userPeriodos['Tarde 🌇'] += val;
     else userPeriodos['Noite 🌃'] += val;
   });
-  let horarioCriticoUser = 'Sem dados';
-  let maxPUser = 0;
+  let horarioCriticoUser = 'Sem dados'; let maxPUser = 0;
   for (const [k, v] of Object.entries(userPeriodos)) {
     if (v > maxPUser && v > 0) { maxPUser = v; horarioCriticoUser = k; }
   }
 
-  // 🗺️ ITEM DO MAPA E PERFIL ADICIONADOS AO MENU
   const navItems = [
     { id: 'inicio', label: 'Início', icon: '🏠' },
     { id: 'ranking', label: 'Ranking', icon: '📊' },
@@ -853,47 +835,20 @@ export default function Home() {
     { id: 'historico', label: 'Galeria', icon: '📸' }
   ] as const;
 
-  const mainWrapperClasses = isModoFesta 
-    ? 'brutal-bg text-white' 
-    : darkMode ? 'bg-slate-950 text-slate-100' : 'bg-amber-50 text-slate-900';
-
-  const cardClasses = isModoFesta
-    ? 'bg-black/60 border border-white/10 backdrop-blur-md shadow-[0_0_20px_rgba(255,255,255,0.1)] text-white'
-    : darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100';
+  const mainWrapperClasses = isModoFesta ? 'brutal-bg text-white' : darkMode ? 'bg-slate-950 text-slate-100' : 'bg-amber-50 text-slate-900';
+  const cardClasses = isModoFesta ? 'bg-black/60 border border-white/10 backdrop-blur-md shadow-[0_0_20px_rgba(255,255,255,0.1)] text-white' : darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100';
 
   return (
     <>
       <style>{`
-        @keyframes marqueeScroll {
-          0% { transform: translateX(100%); }
-          100% { transform: translateX(-100%); }
-        }
-        .animate-marquee {
-          display: inline-block;
-          white-space: nowrap;
-          animation: marqueeScroll 8s linear infinite;
-        }
+        @keyframes marqueeScroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+        .animate-marquee { display: inline-block; white-space: nowrap; animation: marqueeScroll 8s linear infinite; }
+        .custom-cluster-icon { background: transparent; border: none; }
         ${isModoFesta ? `
-          @keyframes discoBg {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-          }
-          @keyframes shakeBrutal {
-            0% { transform: translate(1px, 1px) rotate(0deg); }
-            25% { transform: translate(-2px, -2px) rotate(-1deg); }
-            50% { transform: translate(2px, 2px) rotate(1deg); }
-            75% { transform: translate(-2px, 1px) rotate(0deg); }
-            100% { transform: translate(1px, -1px) rotate(-1deg); }
-          }
-          .brutal-bg {
-            background: linear-gradient(-45deg, #180030, #ff0044, #000000, #00e5ff, #3a0088);
-            background-size: 400% 400%;
-            animation: discoBg 2s ease infinite;
-          }
-          .brutal-shake {
-            animation: shakeBrutal 0.15s infinite;
-          }
+          @keyframes discoBg { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+          @keyframes shakeBrutal { 0% { transform: translate(1px, 1px) rotate(0deg); } 25% { transform: translate(-2px, -2px) rotate(-1deg); } 50% { transform: translate(2px, 2px) rotate(1deg); } 75% { transform: translate(-2px, 1px) rotate(0deg); } 100% { transform: translate(1px, -1px) rotate(-1deg); } }
+          .brutal-bg { background: linear-gradient(-45deg, #180030, #ff0044, #000000, #00e5ff, #3a0088); background-size: 400% 400%; animation: discoBg 2s ease infinite; }
+          .brutal-shake { animation: shakeBrutal 0.15s infinite; }
         ` : ''}
       `}</style>
 
@@ -910,32 +865,16 @@ export default function Home() {
           </div>
         )}
 
-        {/* CABEÇALHO COM BOTÃO DE NOTIFICAÇÕES */}
         <div className="flex justify-between items-center mb-2 pt-2">
           <h1 className={`text-2xl font-extrabold flex items-center gap-2 transition-all ${isModoFesta ? 'text-white drop-shadow-[0_0_10px_rgba(255,0,0,0.8)]' : darkMode ? 'text-amber-400' : 'text-amber-900'}`}>
             {isModoFesta ? 'É SEMPRE A VIRÁ-LOS' : '🍻 Contador'}
           </h1>
           <div className="flex gap-2">
-            <button
-              onClick={handleAtivarNotificacoes}
-              className="px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm bg-blue-600 hover:bg-blue-500 text-white border-blue-500 active:scale-95"
-              title="Ativar ou atualizar subscrição de Notificações"
-            >
-              🔔 Alertas
-            </button>
-            <button
-              onClick={toggleDarkMode}
-              className={`px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm ${
-                isModoFesta ? 'bg-black/50 text-white border-white/20' 
-                : darkMode ? 'bg-slate-900 text-amber-400 border-slate-800' : 'bg-white text-slate-700 border-slate-200'
-              }`}
-            >
-              {darkMode ? '☀️' : '🌙'}
-            </button>
+            <button onClick={handleAtivarNotificacoes} className="px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm bg-blue-600 hover:bg-blue-500 text-white border-blue-500 active:scale-95">🔔 Alertas</button>
+            <button onClick={toggleDarkMode} className={`px-3 py-1.5 rounded-full font-black text-xs transition border flex items-center gap-1.5 shadow-sm ${isModoFesta ? 'bg-black/50 text-white border-white/20' : darkMode ? 'bg-slate-900 text-amber-400 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}>{darkMode ? '☀️' : '🌙'}</button>
           </div>
         </div>
 
-        {/* FITA DE AVISO CSS */}
         {isModoFesta && abaAtiva === 'inicio' && (
           <div className="mb-4 rounded-lg overflow-hidden border-2 border-yellow-400 shadow-[0_0_15px_red] bg-red-600 py-1.5">
             <div className="animate-marquee text-lg font-black text-yellow-300 uppercase tracking-widest leading-none">
@@ -944,10 +883,9 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR 1: INÍCIO */}
+        {/* INÍCIO */}
         {abaAtiva === 'inicio' && (
           <div className="space-y-6">
-            
             <div className="grid grid-cols-2 gap-2 text-center">
               <div className={`p-2.5 rounded-xl border flex items-center justify-center gap-2 ${cardClasses}`}>
                 <span className="text-xl">📅</span>
@@ -970,73 +908,33 @@ export default function Home() {
                 <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Total Equivalente</p>
                 <p className={`text-3xl font-black leading-tight mt-1 ${isModoFesta ? 'text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'text-amber-500'}`}>{formatarFinos(totalFinosGeralEq)}</p>
               </div>
-              {/* LÍDER FIXO ABSOLUTO DA HOME */}
               <div className={`p-4 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
                 <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Líder Absoluto 🍾</p>
-                <p className="text-xl font-black truncate mt-1 text-inherit">
-                  {reiDoFinoAbsoluto && reiDoFinoAbsoluto.countGeral > 0 ? reiDoFinoAbsoluto.nome : '-'}
-                </p>
+                <p className="text-xl font-black truncate mt-1 text-inherit">{reiDoFinoAbsoluto && reiDoFinoAbsoluto.countGeral > 0 ? reiDoFinoAbsoluto.nome : '-'}</p>
               </div>
             </div>
 
             <div className={`p-1.5 rounded-2xl border flex gap-1 ${cardClasses}`}>
-              <button
-                onClick={() => setModoRegisto('individual')}
-                className={`flex-1 py-2.5 rounded-xl font-black text-xs transition ${
-                  modoRegisto === 'individual'
-                    ? (isModoFesta ? 'bg-white text-black' : 'bg-amber-500 text-slate-950')
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                🥂 Registo Individual
-              </button>
-              <button
-                onClick={() => setModoRegisto('rodada')}
-                className={`flex-1 py-2.5 rounded-xl font-black text-xs transition ${
-                  modoRegisto === 'rodada'
-                    ? (isModoFesta ? 'bg-white text-black' : 'bg-amber-500 text-slate-950')
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                💳 Pagar Rodada
-              </button>
+              <button onClick={() => setModoRegisto('individual')} className={`flex-1 py-2.5 rounded-xl font-black text-xs transition ${modoRegisto === 'individual' ? (isModoFesta ? 'bg-white text-black' : 'bg-amber-500 text-slate-950') : 'text-slate-400 hover:text-slate-200'}`}>🥂 Registo Individual</button>
+              <button onClick={() => setModoRegisto('rodada')} className={`flex-1 py-2.5 rounded-xl font-black text-xs transition ${modoRegisto === 'rodada' ? (isModoFesta ? 'bg-white text-black' : 'bg-amber-500 text-slate-950') : 'text-slate-400 hover:text-slate-200'}`}>💳 Pagar Rodada</button>
             </div>
 
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
-              <label className={`block font-bold mb-2 text-sm ${isModoFesta ? 'text-white' : darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
-                {modoRegisto === 'rodada' ? 'Quem vai PAGAR a rodada? 💳' : 'Quem és tu?'}
-              </label>
-              <select
-                className={`w-full p-2.5 border rounded-xl font-bold mb-3 outline-none text-sm ${
-                  isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'
-                }`}
-                value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}
-              >
+              <label className={`block font-bold mb-2 text-sm ${isModoFesta ? 'text-white' : darkMode ? 'text-slate-300' : 'text-slate-700'}`}>{modoRegisto === 'rodada' ? 'Quem vai PAGAR a rodada? 💳' : 'Quem és tu?'}</label>
+              <select className={`w-full p-2.5 border rounded-xl font-bold mb-3 outline-none text-sm ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}>
                 <option value="">-- Seleciona o pagador --</option>
                 {perfis.map((p) => (<option key={p.id} value={p.id}>{p.nome}</option>))}
               </select>
 
               {modoRegisto === 'rodada' && (
                 <div className="mt-3 pt-3 border-t border-slate-800/50">
-                  <label className="block font-extrabold text-xs uppercase tracking-wider mb-2 text-amber-500">
-                    Quem BEBEU na rodada? ({bebedoresRodada.length})
-                  </label>
+                  <label className="block font-extrabold text-xs uppercase tracking-wider mb-2 text-amber-500">Quem BEBEU na rodada? ({bebedoresRodada.length})</label>
                   <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
                     {perfis.map(p => {
                       const isSelected = bebedoresRodada.includes(p.id);
                       return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => toggleBebedorRodada(p.id)}
-                          className={`p-2 rounded-lg border font-bold text-[11px] text-left transition flex justify-between items-center ${
-                            isSelected 
-                              ? 'bg-amber-500/20 border-amber-500 text-amber-400' 
-                              : 'bg-black/20 border-slate-800 text-slate-500'
-                          }`}
-                        >
-                          <span className="truncate">{p.nome}</span>
-                          <span>{isSelected ? '✅' : '⚪'}</span>
+                        <button key={p.id} type="button" onClick={() => toggleBebedorRodada(p.id)} className={`p-2 rounded-lg border font-bold text-[11px] text-left transition flex justify-between items-center ${isSelected ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-black/20 border-slate-800 text-slate-500'}`}>
+                          <span className="truncate">{p.nome}</span><span>{isSelected ? '✅' : '⚪'}</span>
                         </button>
                       );
                     })}
@@ -1045,37 +943,20 @@ export default function Home() {
               )}
 
               <div className="flex gap-2 mt-3">
-                <input 
-                  type="text" placeholder="Novo amigo..." 
-                  className={`flex-1 p-2 border rounded-xl text-sm outline-none font-bold ${
-                    isModoFesta ? 'bg-black/50 border-white/20 text-white placeholder-white/40' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'
-                  }`} 
-                  value={novoNome} onChange={(e) => setNovoNome(e.target.value)} 
-                />
+                <input type="text" placeholder="Novo amigo..." className={`flex-1 p-2 border rounded-xl text-sm outline-none font-bold ${isModoFesta ? 'bg-black/50 border-white/20 text-white placeholder-white/40' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-800'}`} value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
                 <button onClick={criarPerfil} className={`${isModoFesta ? 'bg-white text-black hover:bg-slate-200' : 'bg-amber-600 hover:bg-amber-500'} px-4 py-2 rounded-xl text-sm font-black transition`}>+ Criar</button>
               </div>
             </div>
 
             <div>
-              <label className={`block font-extrabold text-xs uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/70' : darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                O que estão a beber?
-              </label>
+              <label className={`block font-extrabold text-xs uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/70' : darkMode ? 'text-slate-400' : 'text-slate-600'}`}>O que estão a beber?</label>
               <div className="grid grid-cols-2 gap-2">
                 {(Object.keys(TIPOS_BEBIDA) as TipoBebidaKey[]).map((key) => {
                   const item = TIPOS_BEBIDA[key];
                   const isSelected = tipoBebidaSelecionado === key;
                   return (
-                    <button
-                      key={key} onClick={() => setTipoBebidaSelecionado(key)}
-                      className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center justify-center gap-1 ${
-                        isSelected 
-                          ? (isModoFesta ? 'bg-white text-black border-transparent font-black shadow-[0_0_15px_rgba(255,255,255,0.8)] scale-105' : 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-lg scale-105')
-                          : (isModoFesta ? 'bg-black/40 border-white/10 text-white/70' : darkMode ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600')
-                      }`}
-                    >
-                      <span className="text-xl">{item.emoji}</span>
-                      <span className="text-[10px] uppercase font-bold leading-tight">{item.label.split(' ')[1]}</span>
-                      <span className="text-[9px] opacity-80">({item.equivalencia}x finos)</span>
+                    <button key={key} onClick={() => setTipoBebidaSelecionado(key)} className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center justify-center gap-1 ${isSelected ? (isModoFesta ? 'bg-white text-black border-transparent font-black shadow-[0_0_15px_rgba(255,255,255,0.8)] scale-105' : 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-lg scale-105') : (isModoFesta ? 'bg-black/40 border-white/10 text-white/70' : darkMode ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600')}`}>
+                      <span className="text-xl">{item.emoji}</span><span className="text-[10px] uppercase font-bold leading-tight">{item.label.split(' ')[1]}</span><span className="text-[9px] opacity-80">({item.equivalencia}x finos)</span>
                     </button>
                   );
                 })}
@@ -1083,45 +964,21 @@ export default function Home() {
             </div>
 
             <div className="text-center relative">
-              <label className={`inline-block w-full py-6 rounded-2xl font-black text-2xl shadow-xl cursor-pointer transition transform active:scale-95 ${
-                selectedUser 
-                  ? (isModoFesta 
-                      ? 'brutal-shake bg-gradient-to-r from-red-600 via-pink-600 to-purple-600 text-white border-4 border-yellow-400 shadow-[0_0_40px_rgba(255,0,0,0.8)]' 
-                      : 'bg-amber-500 hover:bg-amber-400 shadow-amber-500/20 text-slate-950') 
-                  : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-              }`}>
-                {loading 
-                  ? 'A guardar... 🍻' 
-                  : modoRegisto === 'rodada'
-                    ? '💳 CONFIRMAR RODADA PAGA!'
-                    : isModoFesta 
-                      ? 'MANDA VIR CRL! 🚀' 
-                      : `${TIPOS_BEBIDA[tipoBebidaSelecionado].emoji} +1 ${tipoBebidaSelecionado.toUpperCase()}`
-                }
+              <label className={`inline-block w-full py-6 rounded-2xl font-black text-2xl shadow-xl cursor-pointer transition transform active:scale-95 ${selectedUser ? (isModoFesta ? 'brutal-shake bg-gradient-to-r from-red-600 via-pink-600 to-purple-600 text-white border-4 border-yellow-400 shadow-[0_0_40px_rgba(255,0,0,0.8)]' : 'bg-amber-500 hover:bg-amber-400 shadow-amber-500/20 text-slate-950') : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}>
+                {loading ? 'A guardar... 🍻' : modoRegisto === 'rodada' ? '💳 CONFIRMAR RODADA PAGA!' : isModoFesta ? 'MANDA VIR CRL! 🚀' : `${TIPOS_BEBIDA[tipoBebidaSelecionado].emoji} +1 ${tipoBebidaSelecionado.toUpperCase()}`}
                 <input type="file" accept="image/*" capture="environment" className="hidden" disabled={!selectedUser || loading} onChange={registarFino} />
               </label>
             </div>
 
             <div className="text-center mt-6">
-              <button 
-                onClick={abrirModalGregorio}
-                disabled={!selectedUser || loading}
-                className={`px-4 py-2.5 rounded-xl text-xs font-black transition ${
-                  selectedUser 
-                    ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 active:scale-95' 
-                    : (isModoFesta ? 'bg-black/50 border border-red-900/50 text-red-900/50' : darkMode ? 'bg-slate-900 border border-slate-800 text-slate-700' : 'bg-slate-100 border border-slate-200 text-slate-400')
-                }`}
-              >
-                🤮 Fiz mau
-              </button>
+              <button onClick={abrirModalGregorio} disabled={!selectedUser || loading} className={`px-4 py-2.5 rounded-xl text-xs font-black transition ${selectedUser ? 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 active:scale-95' : (isModoFesta ? 'bg-black/50 border border-red-900/50 text-red-900/50' : darkMode ? 'bg-slate-900 border border-slate-800 text-slate-700' : 'bg-slate-100 border border-slate-200 text-slate-400')}`}>🤮 Fiz mau</button>
             </div>
           </div>
         )}
 
-        {/* SEPARADOR 2: RANKING E ESTATÍSTICAS COMPLETAS */}
+        {/* RANKING */}
         {abaAtiva === 'ranking' && (
           <div className="space-y-6">
-            
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <div className="flex justify-between items-center mb-3 border-b pb-2 border-slate-800/50">
                 <h2 className="font-bold text-lg flex items-center gap-2">📊 Tabela Geral</h2>
@@ -1134,62 +991,27 @@ export default function Home() {
               <div className="space-y-2">
                 {contagemPorPessoa.map((p, idx) => {
                   const statusBadge = TITULOS_RANKING[idx] || TITULOS_RANKING[TITULOS_RANKING.length - 1];
-                  
-                  const userCurrentStreak = statsStreaks.find(s => s.id === p.id)?.currentStreak || 0;
                   const estaExpandido = !!usersExpandidos[p.id];
 
                   return (
-                    <div 
-                      key={p.id} 
-                      onClick={() => toggleUserExpandido(p.id)} 
-                      className={`p-3 rounded-xl border cursor-pointer transition ${
-                        isModoFesta ? 'bg-black/30 border-white/10 hover:bg-white/10' : darkMode ? 'bg-slate-950/50 border-slate-800 hover:bg-slate-800' : 'bg-slate-50/50 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
+                    <div key={p.id} onClick={() => toggleUserExpandido(p.id)} className={`p-3 rounded-xl border cursor-pointer transition ${isModoFesta ? 'bg-black/30 border-white/10 hover:bg-white/10' : darkMode ? 'bg-slate-950/50 border-slate-800 hover:bg-slate-800' : 'bg-slate-50/50 border-slate-200 hover:bg-slate-100'}`}>
                       <div className="flex justify-between items-center text-sm">
                         <div className="truncate pr-2">
                           <span className="font-bold">{idx + 1}. {p.nome}</span>
-                          {p.nome_real && <span className="text-[10px] text-slate-400 ml-1.5 font-normal">({p.nome_real})</span>}
                           <span className="text-[10px] text-amber-500 font-semibold block mt-0.5">{statusBadge}</span>
                         </div>
                         <div className="text-right flex items-center gap-2 shrink-0">
-                          <span className={`font-black px-3 py-1 rounded-full text-xs border ${isModoFesta ? 'bg-white/20 text-white border-white/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>
-                            {formatarFinos(p.count)} finos
-                          </span>
+                          <span className={`font-black px-3 py-1 rounded-full text-xs border ${isModoFesta ? 'bg-white/20 text-white border-white/30' : 'bg-amber-500/20 text-amber-400 border-amber-500/30'}`}>{formatarFinos(p.count)} finos</span>
                           <span className="text-xs opacity-60">{estaExpandido ? '▲' : '▼'}</span>
                         </div>
                       </div>
 
-                      {/* CRACHÁS */}
-                      {(p.conquistas.length > 0 || userCurrentStreak > 1 || p.gregorios > 0 || p.periodoForte) && (
+                      {(p.conquistas.length > 0 || p.gregorios > 0 || p.periodoForte) && (
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {p.gregorios > 0 && (
-                            <span className="bg-red-500/10 text-red-400 border border-red-500/30 text-[10px] px-1.5 py-0.5 rounded-md font-bold">
-                              🤮 {p.gregorios}x Vómitos
-                            </span>
-                          )}
-                          {userCurrentStreak > 1 && (
-                            <span className="bg-orange-500/20 text-orange-400 border border-orange-500/30 text-[10px] px-1.5 py-0.5 rounded-md font-bold">
-                              🔥 {userCurrentStreak} Dias
-                            </span>
-                          )}
-                          {p.periodoForte && (
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${isModoFesta ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' : 'bg-cyan-500/10 text-cyan-600 border-cyan-500/30'}`}>
-                              🕒 Forte: {p.periodoForte}
-                            </span>
-                          )}
+                          {p.gregorios > 0 && <span className="bg-red-500/10 text-red-400 border border-red-500/30 text-[10px] px-1.5 py-0.5 rounded-md font-bold">🤮 {p.gregorios}x Vómitos</span>}
+                          {p.periodoForte && <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${isModoFesta ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' : 'bg-cyan-500/10 text-cyan-600 border-cyan-500/30'}`}>🕒 Forte: {p.periodoForte.split(' ')[0]}</span>}
                           {p.conquistas.map((badgeText: string, i: number) => (
-                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${
-                              badgeText.includes('🌵')
-                                ? 'bg-yellow-900/30 text-yellow-500 border-yellow-700/50'
-                                : badgeText.includes('💸')
-                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black'
-                                  : badgeText.includes('👑') || badgeText.includes('🏆') 
-                                    ? 'bg-amber-500 text-black border-amber-300 font-black shadow-sm' 
-                                    : isModoFesta ? 'bg-white/10 text-white border-white/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                            }`}>
-                              {badgeText}
-                            </span>
+                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold border ${badgeText.includes('🌵') ? 'bg-yellow-900/30 text-yellow-500 border-yellow-700/50' : badgeText.includes('💸') ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black' : badgeText.includes('👑') || badgeText.includes('🏆') ? 'bg-amber-500 text-black border-amber-300 font-black shadow-sm' : isModoFesta ? 'bg-white/10 text-white border-white/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>{badgeText}</span>
                           ))}
                         </div>
                       )}
@@ -1206,14 +1028,8 @@ export default function Home() {
                                   {fotosUser.map(f => (
                                     <div key={f.id} className="relative group cursor-pointer" onClick={() => setFotoExpandida(f.foto_url)}>
                                       <img src={f.foto_url} loading="lazy" className="w-full h-28 object-cover rounded-lg shadow-sm hover:opacity-90 transition" alt="Fino"/>
-                                      <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[8px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm tracking-wide">
-                                        {new Date(f.data_hora).toLocaleDateString('pt-PT', {day:'2-digit', month:'2-digit', year:'2-digit'})} {new Date(f.data_hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}
-                                      </div>
-                                      {f.pagador_id && (
-                                        <div className="absolute top-1 left-1 bg-emerald-600/90 text-white text-[7px] px-1 py-0.5 rounded font-black backdrop-blur-sm">
-                                          💳 Rodada Paga
-                                        </div>
-                                      )}
+                                      <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[8px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm tracking-wide">{new Date(f.data_hora).toLocaleDateString('pt-PT', {day:'2-digit', month:'2-digit', year:'2-digit'})} {new Date(f.data_hora).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}</div>
+                                      {f.pagador_id && <div className="absolute top-1 left-1 bg-emerald-600/90 text-white text-[7px] px-1 py-0.5 rounded font-black backdrop-blur-sm">💳 Rodada Paga</div>}
                                     </div>
                                   ))}
                                 </div>
@@ -1228,107 +1044,82 @@ export default function Home() {
               </div>
             </div>
 
-            {/* FRENTE A FRENTE 1V1 */}
-            {perfis.length >= 2 && finosValidos.length > 0 && (
-              <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
-                <h2 className="font-bold text-lg mb-3 border-b pb-2 border-slate-800/50 flex items-center gap-2">⚔️ Frente-a-Frente</h2>
-                <div className="flex gap-2 items-center mb-4">
-                  <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter1} onChange={(e) => setFighter1(e.target.value)}>
-                    <option value="">Desafiante 1</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
-                  </select>
-                  <span className="font-black text-slate-500 text-sm">VS</span>
-                  <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter2} onChange={(e) => setFighter2(e.target.value)}>
-                    <option value="">Desafiante 2</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
-                  </select>
-                </div>
-                {fighter1 && fighter2 && fighter1 !== fighter2 && f1Stats && f2Stats && (
-                  <div className={`border rounded-xl p-3 space-y-3 ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                    <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
-                      <span className={`w-1/3 text-left font-black text-lg ${f1Stats.count > f2Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f1Stats.count)}</span>
-                      <span className="w-1/3 text-center text-[9px] uppercase font-bold text-slate-500">Total Equivalente</span>
-                      <span className={`w-1/3 text-right font-black text-lg ${f2Stats.count > f1Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f2Stats.count)}</span>
-                    </div>
-                  </div>
-                )}
+            <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
+              <h2 className="font-bold text-lg mb-3 border-b pb-2 border-slate-800/50 flex items-center gap-2">⚔️ Frente-a-Frente</h2>
+              <div className="flex gap-2 items-center mb-4">
+                <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter1} onChange={(e) => setFighter1(e.target.value)}><option value="">Desafiante 1</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
+                <span className="font-black text-slate-500 text-sm">VS</span>
+                <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter2} onChange={(e) => setFighter2(e.target.value)}><option value="">Desafiante 2</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
               </div>
-            )}
-
-            {/* ESTATÍSTICAS E RECORDES */}
-            {finosValidos.length > 0 && (
-              <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
-                <h2 className="font-bold text-lg mb-4 border-b pb-2 border-slate-800/50">📈 Curiosidades</h2>
-                <div className="grid grid-cols-2 gap-4">
-                  
-                  <div>
-                    <h3 className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>Dias mais fortes</h3>
-                    <div className="space-y-1.5">
-                      {diasSemanaCount.map((count, i) => (
-                        <div key={i} className="flex items-center text-[9px]">
-                          <span className={`w-5 font-bold ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>{nomesDias[i]}</span>
-                          <div className={`flex-1 h-2.5 rounded-full ml-1 overflow-hidden ${isModoFesta ? 'bg-black' : darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
-                            <div className={`h-full rounded-full ${isModoFesta ? 'bg-fuchsia-500' : 'bg-amber-500'}`} style={{width: `${(count/maxDiaCount)*100}%`}}></div>
-                          </div>
+              {fighter1 && fighter2 && fighter1 !== fighter2 && f1Stats && f2Stats && (
+                <div className={`border rounded-xl p-3 space-y-3 ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
+                    <span className={`w-1/3 text-left font-black text-lg ${f1Stats.count > f2Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f1Stats.count)}</span>
+                    <span className="w-1/3 text-center text-[9px] uppercase font-bold text-slate-500">Total</span>
+                    <span className={`w-1/3 text-right font-black text-lg ${f2Stats.count > f1Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f2Stats.count)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
+              <h2 className="font-bold text-lg mb-4 border-b pb-2 border-slate-800/50">📈 Curiosidades</h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>Dias mais fortes</h3>
+                  <div className="space-y-1.5">
+                    {diasSemanaCount.map((count, i) => (
+                      <div key={i} className="flex items-center text-[9px]">
+                        <span className={`w-5 font-bold ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>{nomesDias[i]}</span>
+                        <div className={`flex-1 h-2.5 rounded-full ml-1 overflow-hidden ${isModoFesta ? 'bg-black' : darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
+                          <div className={`h-full rounded-full ${isModoFesta ? 'bg-fuchsia-500' : 'bg-amber-500'}`} style={{width: `${(count/maxDiaCount)*100}%`}}></div>
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
-
-                  <div>
-                    <h3 className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>Horas de Ponta</h3>
-                    <div className={`flex items-end h-28 gap-1.5 p-2 rounded-xl border ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                      {Object.entries(horasCount).map(([label, count]) => {
-                        const isZero = count === 0;
-                        return (
-                          <div key={label} className="flex-1 flex flex-col items-center justify-end h-full">
-                            <span className={`text-[9px] font-bold mb-1 ${isZero ? '' : isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isZero ? '' : formatarFinos(count)}</span>
-                            <div className={`w-full rounded-t-sm transition-all ${isZero ? (isModoFesta ? 'bg-white/10' : 'bg-slate-800') : (isModoFesta ? 'bg-fuchsia-400' : 'bg-amber-400')}`} style={{height: isZero ? '2px' : `${(count/maxHoraCount)*100}%`, minHeight: '2px'}}></div>
-                            <span className={`text-[8px] mt-1 truncate w-full text-center ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>{label}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                </div>
+                <div>
+                  <h3 className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>Horas de Ponta</h3>
+                  <div className={`flex items-end h-28 gap-1.5 p-2 rounded-xl border ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    {Object.entries(horasCount).map(([label, count]) => {
+                      const isZero = count === 0;
+                      return (
+                        <div key={label} className="flex-1 flex flex-col items-center justify-end h-full">
+                          <span className={`text-[9px] font-bold mb-1 ${isZero ? '' : isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isZero ? '' : formatarFinos(count)}</span>
+                          <div className={`w-full rounded-t-sm transition-all ${isZero ? (isModoFesta ? 'bg-white/10' : 'bg-slate-800') : (isModoFesta ? 'bg-fuchsia-400' : 'bg-amber-400')}`} style={{height: isZero ? '2px' : `${(count/maxHoraCount)*100}%`, minHeight: '2px'}}></div>
+                          <span className={`text-[8px] mt-1 truncate w-full text-center ${isModoFesta ? 'text-white/60' : 'text-slate-500'}`}>{label}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-
                 </div>
               </div>
-            )}
-
+            </div>
           </div>
         )}
 
-        {/* 🪪 SEPARADOR: PERFIL E FICHA MÉDICA DO BEBEDOR */}
+        {/* 🪪 FICHA MÉDICA */}
         {abaAtiva === 'perfil' && (
           <div className="space-y-6">
             <div className={`p-5 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-black text-xl mb-4 flex items-center gap-2">🪪 Ficha Médica</h2>
 
-              {/* SELETOR DE PERFIL CUSTOMIZADO */}
               <div className="relative mb-6">
                 <button 
                   onClick={() => setSeletorPerfilAberto(!seletorPerfilAberto)}
-                  className={`w-full p-3 rounded-xl border font-black text-left flex justify-between items-center transition ${
-                    isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-700 text-white shadow-lg' : 'bg-white border-slate-300 text-slate-800 shadow-md'
-                  }`}
+                  className={`w-full p-3 rounded-xl border font-black text-left flex justify-between items-center transition ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-700 text-white shadow-lg' : 'bg-white border-slate-300 text-slate-800 shadow-md'}`}
                 >
-                  <span className="truncate">
-                    {perfilAtualObj ? `${perfilAtualObj.nome} ${perfilAtualObj.nome_real ? `(${perfilAtualObj.nome_real})` : ''}` : '-- Escolhe o doente --'}
-                  </span>
+                  <span className="truncate">{perfilAtualObj ? `${perfilAtualObj.nome} ${perfilAtualObj.nome_real ? `(${perfilAtualObj.nome_real})` : ''}` : '-- Escolhe o doente --'}</span>
                   <span className={`transform transition-transform ${seletorPerfilAberto ? 'rotate-180' : ''}`}>▼</span>
                 </button>
 
                 {seletorPerfilAberto && (
-                  <div className={`absolute top-full left-0 right-0 mt-2 rounded-xl border shadow-2xl overflow-hidden z-50 max-h-60 overflow-y-auto ${
-                    isModoFesta ? 'bg-black/90 border-white/20 backdrop-blur-md' : darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-                  }`}>
+                  <div className={`absolute top-full left-0 right-0 mt-2 rounded-xl border shadow-2xl overflow-hidden z-50 max-h-60 overflow-y-auto ${isModoFesta ? 'bg-black/90 border-white/20 backdrop-blur-md' : darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}>
                     {perfis.map(p => (
                       <button
                         key={p.id}
                         onClick={() => { setPerfilSelecionadoId(p.id); setSeletorPerfilAberto(false); }}
-                        className={`w-full p-3 text-left border-b font-bold text-sm transition hover:bg-amber-500/20 last:border-0 ${
-                          perfilSelecionadoId === p.id 
-                            ? 'bg-amber-500/10 text-amber-500 border-slate-800/50' 
-                            : isModoFesta ? 'text-white border-white/10' : darkMode ? 'text-slate-300 border-slate-800' : 'text-slate-700 border-slate-100'
-                        }`}
+                        className={`w-full p-3 text-left border-b font-bold text-sm transition hover:bg-amber-500/20 last:border-0 ${perfilSelecionadoId === p.id ? 'bg-amber-500/10 text-amber-500 border-slate-800/50' : isModoFesta ? 'text-white border-white/10' : darkMode ? 'text-slate-300 border-slate-800' : 'text-slate-700 border-slate-100'}`}
                       >
                         {p.nome} {p.nome_real && <span className="opacity-60 text-xs font-normal">({p.nome_real})</span>}
                       </button>
@@ -1339,8 +1130,6 @@ export default function Home() {
 
               {perfilAtualObj && (
                 <div className="space-y-4 pt-2 border-t border-slate-800/50">
-                  
-                  {/* IDENTIFICAÇÃO E TÍTULO */}
                   <div className="grid grid-cols-2 gap-2 text-center">
                     <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                       <p className="text-[9px] font-bold uppercase text-slate-400">🤠 Nome de Código</p>
@@ -1352,7 +1141,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* SINAIS VITAIS GERAIS */}
                   <div className="grid grid-cols-2 gap-2">
                     <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                       <p className="text-[9px] font-bold uppercase text-slate-400">🍺 Medicação Ingerida</p>
@@ -1365,24 +1153,32 @@ export default function Home() {
                     </div>
 
                     <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                      <p className="text-[9px] font-bold uppercase text-slate-400">📊 Carga no Grupo</p>
-                      <p className="text-lg font-black mt-0.5 text-cyan-400">{percentualColoGrupo}%</p>
-                      <p className="text-[8px] text-slate-500 leading-tight mt-0.5">do consumo total</p>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">📊 Média Diária</p>
+                      <p className="text-lg font-black mt-0.5 text-blue-400">{mediaFinosPorDia} <span className="text-xs font-semibold text-slate-400">p/ dia</span></p>
                     </div>
 
                     <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                      <p className="text-[9px] font-bold uppercase text-slate-400">🧨 Recorde de Streak</p>
-                      <p className="text-lg font-black mt-0.5 text-orange-500">{melhorStreakAtual} <span className="text-xs font-semibold text-slate-400">dias</span></p>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">📊 Carga no Grupo</p>
+                      <p className="text-lg font-black mt-0.5 text-cyan-400">{percentualColoGrupo}% <span className="text-xs font-normal opacity-70">do total</span></p>
                     </div>
                   </div>
 
-                  {/* NOVOS SINAIS VITAIS CLÍNICOS */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">🔥 Streak Atual</p>
+                      <p className="text-lg font-black mt-0.5 text-orange-500">{streakVivoAtual} <span className="text-xs font-semibold text-slate-400">dias</span></p>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                      <p className="text-[9px] font-bold uppercase text-slate-400">🧨 Melhor Streak</p>
+                      <p className="text-lg font-black mt-0.5 text-orange-600">{melhorStreakAtual} <span className="text-xs font-semibold text-slate-400">dias</span></p>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div className={`p-3 rounded-xl border flex flex-col justify-center items-center text-center ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                       <p className="text-[9px] font-bold uppercase text-slate-400 w-full">📈 Pace Cardíaco</p>
-                      <p className="text-sm font-black mt-1 text-fuchsia-400">
-                        {paceCardiacoUser > 0 ? `1 copo a cada ${paceCardiacoUser} min` : 'Sem dados suficientes'}
-                      </p>
+                      <p className="text-sm font-black mt-1 text-fuchsia-400">{paceCardiacoUser > 0 ? `1 copo a cada ${paceCardiacoUser} min` : 'Sem dados suficientes'}</p>
                     </div>
 
                     <div className={`p-3 rounded-xl border flex flex-col justify-center items-center text-center ${isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
@@ -1390,39 +1186,20 @@ export default function Home() {
                       <p className="text-sm font-black mt-1 text-yellow-400">{horarioCriticoUser}</p>
                     </div>
 
-                    <div className={`p-3 rounded-xl border flex flex-col justify-center items-center text-center ${
-                      totalVomitosUser > 0 
-                        ? 'bg-red-500/10 border-red-500/30' 
-                        : isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'
-                    }`}>
+                    <div className={`p-3 rounded-xl border flex flex-col justify-center items-center text-center ${totalVomitosUser > 0 ? 'bg-red-500/10 border-red-500/30' : isModoFesta ? 'bg-black/30 border-white/10' : darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                       <p className="text-[9px] font-bold uppercase text-slate-400 w-full">🤢 Nível de Risco</p>
-                      <p className={`text-sm font-black mt-1 ${totalVomitosUser > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                        {totalVomitosUser === 0 ? 'Fígado de Ferro 🛡️' : `Risco Elevado ☣️ (${totalVomitosUser}x)`}
-                      </p>
+                      <p className={`text-sm font-black mt-1 ${totalVomitosUser > 0 ? 'text-red-500' : 'text-emerald-500'}`}>{totalVomitosUser === 0 ? 'Fígado de Ferro 🛡️' : `Risco Elevado ☣️ (${totalVomitosUser}x)`}</p>
                     </div>
                   </div>
 
-                  {/* CABINE DE TROFÉUS */}
                   <div className="pt-3">
-                    <p className="text-xs font-black uppercase text-amber-500 mb-2 tracking-wider flex items-center gap-1.5">
-                      <span>🏆 Cabine de Troféus</span>
-                      <span className="text-[10px] text-slate-500 font-semibold">({conquistasAtual.length})</span>
-                    </p>
+                    <p className="text-xs font-black uppercase text-amber-500 mb-2 tracking-wider flex items-center gap-1.5"><span>🏆 Cabine de Troféus</span><span className="text-[10px] text-slate-500 font-semibold">({conquistasAtual.length})</span></p>
                     {conquistasAtual.length === 0 ? (
                       <p className="text-xs text-slate-500 py-2 italic text-center">Ainda sem troféus desbloqueados. É preciso dar mais uso ao copo!</p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
                         {conquistasAtual.map((badge, idx) => (
-                          <div 
-                            key={idx} 
-                            className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black border shadow-sm flex items-center gap-1 ${
-                              badge.includes('👑') || badge.includes('🏆')
-                                ? 'bg-amber-500 text-slate-950 border-amber-300'
-                                : badge.includes('💸')
-                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                            }`}
-                          >
+                          <div key={idx} className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black border shadow-sm flex items-center gap-1 ${badge.includes('👑') || badge.includes('🏆') ? 'bg-amber-500 text-slate-950 border-amber-300' : badge.includes('💸') ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
                             <span>{badge}</span>
                           </div>
                         ))}
@@ -1436,107 +1213,61 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR: SORTEADOR DA PRÓXIMA RODADA */}
+        {/* SORTEADOR DA RODA */}
         {abaAtiva === 'rodada' && (
           <div className="space-y-6">
             <div className={`p-5 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-black text-xl mb-1 flex items-center gap-2">🎲 Sorteador da Rodada</h2>
-              <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                Seleciona quem está presente na mesa para sortear quem paga a próxima rodada de bebidas!
-              </p>
+              <p className="text-xs text-slate-400 mb-4 leading-relaxed">Seleciona quem está presente na mesa para sortear quem paga a próxima rodada de bebidas!</p>
 
               <div className="flex justify-between items-center mb-3">
-                <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">
-                  Quem está na mesa? ({presentesMesa.length})
-                </span>
-                <div className="flex gap-2 text-[10px] font-bold">
-                  <button onClick={selecionarTodosMesa} className="text-amber-500 hover:underline">Todos</button>
-                  <span className="text-slate-600">|</span>
-                  <button onClick={limparMesa} className="text-slate-400 hover:underline">Limpar</button>
-                </div>
+                <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">Quem está na mesa? ({presentesMesa.length})</span>
+                <div className="flex gap-2 text-[10px] font-bold"><button onClick={selecionarTodosMesa} className="text-amber-500 hover:underline">Todos</button><span className="text-slate-600">|</span><button onClick={limparMesa} className="text-slate-400 hover:underline">Limpar</button></div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 mb-6">
                 {perfis.map(p => {
                   const isPresente = presentesMesa.includes(p.id);
                   const isOnRoleta = roletaRodadaId === p.id;
-
                   return (
-                    <button
-                      key={p.id}
-                      onClick={() => toggleMesa(p.id)}
-                      className={`p-3 rounded-xl border font-bold text-xs transition flex items-center justify-between ${
-                        isOnRoleta
-                          ? 'bg-amber-500 text-black border-amber-300 scale-105 shadow-lg'
-                          : isPresente
-                            ? (isModoFesta ? 'bg-white/20 border-white/40 text-white' : 'bg-amber-500/10 border-amber-500/40 text-amber-400')
-                            : (isModoFesta ? 'bg-black/40 border-white/5 text-white/40' : darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-600' : 'bg-slate-100 border-slate-200 text-slate-400')
-                      }`}
-                    >
-                      <span className="truncate">{p.nome}</span>
-                      <span>{isPresente ? '✅' : '⚪'}</span>
+                    <button key={p.id} onClick={() => toggleMesa(p.id)} className={`p-3 rounded-xl border font-bold text-xs transition flex items-center justify-between ${isOnRoleta ? 'bg-amber-500 text-black border-amber-300 scale-105 shadow-lg' : isPresente ? (isModoFesta ? 'bg-white/20 border-white/40 text-white' : 'bg-amber-500/10 border-amber-500/40 text-amber-400') : (isModoFesta ? 'bg-black/40 border-white/5 text-white/40' : darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-600' : 'bg-slate-100 border-slate-200 text-slate-400')}`}>
+                      <span className="truncate">{p.nome}</span><span>{isPresente ? '✅' : '⚪'}</span>
                     </button>
                   );
                 })}
               </div>
 
-              <button
-                onClick={sortearQuemPaga}
-                disabled={isSorteandoRodada || presentesMesa.length < 2}
-                className={`w-full py-4 rounded-xl font-black text-lg shadow-xl transition transform active:scale-95 ${
-                  isSorteandoRodada 
-                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                    : presentesMesa.length >= 2
-                      ? (isModoFesta ? 'bg-gradient-to-r from-red-600 via-pink-600 to-purple-600 text-white border-2 border-yellow-400' : 'bg-amber-500 hover:bg-amber-400 text-slate-950')
-                      : 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                }`}
-              >
+              <button onClick={sortearQuemPaga} disabled={isSorteandoRodada || presentesMesa.length < 2} className={`w-full py-4 rounded-xl font-black text-lg shadow-xl transition transform active:scale-95 ${isSorteandoRodada ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : presentesMesa.length >= 2 ? (isModoFesta ? 'bg-gradient-to-r from-red-600 via-pink-600 to-purple-600 text-white border-2 border-yellow-400' : 'bg-amber-500 hover:bg-amber-400 text-slate-950') : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
                 {isSorteandoRodada ? 'A rodar a roleta... 🍻' : '💸 QUEM PAGA A RODADA?'}
               </button>
 
               {vitimaRodada && (
-                <div className={`mt-6 p-5 rounded-2xl border text-center relative shadow-2xl animate-bounce ${
-                  isModoFesta ? 'bg-red-600 border-yellow-400 text-white' : 'bg-amber-500 text-slate-950 border-amber-300'
-                }`}>
-                  <button 
-                    onClick={() => setVitimaRodada(null)}
-                    className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-black/20 hover:bg-black/40 font-black text-xs flex items-center justify-center transition"
-                    title="Fechar resultado"
-                  >
-                    ✕
-                  </button>
+                <div className={`mt-6 p-5 rounded-2xl border text-center relative shadow-2xl animate-bounce ${isModoFesta ? 'bg-red-600 border-yellow-400 text-white' : 'bg-amber-500 text-slate-950 border-amber-300'}`}>
+                  <button onClick={() => setVitimaRodada(null)} className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-black/20 hover:bg-black/40 font-black text-xs flex items-center justify-center transition" title="Fechar resultado">✕</button>
                   <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Parabéns!</p>
                   <h3 className="text-2xl font-black mt-1">🍻 {vitimaRodada.nome} PAGA A RODADA!</h3>
                   <p className="text-xs font-semibold mt-1 opacity-90">Oupas! 🍻</p>
-                  <button
-                    onClick={() => setVitimaRodada(null)}
-                    className="mt-3 px-4 py-1.5 rounded-lg bg-black/20 hover:bg-black/30 font-black text-xs transition"
-                  >
-                    OK / Fechar
-                  </button>
+                  <button onClick={() => setVitimaRodada(null)} className="mt-3 px-4 py-1.5 rounded-lg bg-black/20 hover:bg-black/30 font-black text-xs transition">OK / Fechar</button>
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* 🗺️ SEPARADOR: MAPA DE CALOR MUNDIAL 🔥 */}
+        {/* 🗺️ MAPA MUNDIAL DE CLUSTERS */}
         {abaAtiva === 'mapa' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
-              <h2 className="font-bold text-lg mb-1 flex items-center gap-2">🔥 Mapa de Calor das Bebidas</h2>
-              <p className="text-xs text-slate-400 mb-4">
-                As zonas mais "quentes" no mapa representam onde o grupo mais fodeu as beiças aos finos!
-              </p>
-              
+              <h2 className="font-bold text-lg mb-1 flex items-center gap-2">🗺️ Onde Bebe O Grupo?</h2>
+              <p className="text-xs text-slate-400 mb-4">Mapeamento em tempo real com GPS. Foca o mapa para veres em que tascos as bebidas se dividem!</p>
               <div className="w-full h-96 rounded-2xl overflow-hidden border border-slate-700/50 shadow-inner relative z-10">
-                <div id="mapa-calor-container" className="w-full h-full"></div>
+                <div id="mapa-calor-container" className="w-full h-full bg-slate-900"></div>
               </div>
             </div>
           </div>
         )}
 
-        {/* SEPARADOR 4: GRANDES FEITOS */}
+        {/* GRANDES FEITOS */}
         {abaAtiva === 'feitos' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
@@ -1568,9 +1299,7 @@ export default function Home() {
                     <div key={marco.meta} className={`p-3 rounded-xl border relative overflow-hidden ${isModoFesta ? 'bg-black/50 border-white/10' : darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                       <div className={`font-black text-sm mb-1 ${isModoFesta ? 'text-white/40' : darkMode ? 'text-slate-600' : 'text-slate-400'}`}>🔒 {marco.meta} Finos</div>
                       <p className={`text-xs leading-relaxed blur-[5px] select-none ${isModoFesta ? 'text-white/20' : darkMode ? 'text-slate-600' : 'text-slate-300'}`}>{marco.texto}</p>
-                      <div className="absolute inset-0 flex items-center justify-center z-10">
-                        <span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-full shadow-md border ${isModoFesta ? 'bg-black text-white border-white/30' : darkMode ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-500 border-slate-200'}`}>Faltam {formatarFinos(faltam)}</span>
-                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center z-10"><span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-full shadow-md border ${isModoFesta ? 'bg-black text-white border-white/30' : darkMode ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-slate-500 border-slate-200'}`}>Faltam {formatarFinos(faltam)}</span></div>
                     </div>
                   );
                 })}
@@ -1579,7 +1308,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* SEPARADOR 5: HISTÓRICO E GALERIA */}
+        {/* GALERIA */}
         {abaAtiva === 'historico' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
@@ -1591,7 +1320,6 @@ export default function Home() {
                   {Object.entries(finosPorDiaParaLista).map(([dia, listaFinos]) => {
                     const estaAberto = !!diasAbertos[dia];
                     const totalDiaEq = listaFinos.filter(f => f.tipo_bebida !== 'gregorio').reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
-                    
                     return (
                       <div key={dia} className={`border rounded-2xl overflow-hidden ${isModoFesta ? 'border-white/20 bg-black/40' : darkMode ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
                         <button onClick={() => toggleDia(dia)} className={`w-full p-3 flex justify-between items-center text-left transition ${isModoFesta ? 'bg-white/5 hover:bg-white/10' : darkMode ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-100 hover:bg-slate-200'}`}>
@@ -1604,7 +1332,6 @@ export default function Home() {
                               const isGregorio = f.tipo_bebida === 'gregorio';
                               const bebidaKey = (f.tipo_bebida as TipoBebidaKey) || 'fino';
                               const emojiBebida = isGregorio ? '🤮' : (TIPOS_BEBIDA[bebidaKey]?.emoji || '🥂');
-                              
                               return (
                                 <div key={f.id} className="border-b border-slate-800/50 pb-2 last:border-0">
                                   <div className="flex justify-between text-xs text-slate-400 mb-1">
@@ -1612,17 +1339,11 @@ export default function Home() {
                                       {emojiBebida} <strong className={isModoFesta ? 'text-white' : darkMode ? 'text-slate-200' : 'text-slate-800'}>{f.perfis?.nome || 'Desconhecido'}</strong>
                                       {!isGregorio && <span className="text-[10px] ml-1 opacity-70">({f.quantidade_equivalente ?? 1}x)</span>}
                                       {isGregorio && <span className="text-[10px] ml-1 text-red-400 font-bold opacity-90">(Vomitou)</span>}
-                                      {f.pagador_id && (
-                                        <span className="text-[9px] ml-1 text-emerald-400 font-bold">
-                                          (💳 Paga por {perfis.find(p=>p.id===f.pagador_id)?.nome})
-                                        </span>
-                                      )}
+                                      {f.pagador_id && <span className="text-[9px] ml-1 text-emerald-400 font-bold">(💳 Paga por {perfis.find(p=>p.id===f.pagador_id)?.nome})</span>}
                                     </span>
                                     <span className="text-slate-500">{new Date(f.data_hora).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                   </div>
-                                  {f.foto_url && (
-                                    <img src={f.foto_url} alt="Bebida" loading="lazy" onClick={() => setFotoExpandida(f.foto_url)} className="w-full h-40 object-cover rounded-xl shadow-sm mt-1 cursor-pointer hover:opacity-90 transition" />
-                                  )}
+                                  {f.foto_url && <img src={f.foto_url} alt="Bebida" loading="lazy" onClick={() => setFotoExpandida(f.foto_url)} className="w-full h-40 object-cover rounded-xl shadow-sm mt-1 cursor-pointer hover:opacity-90 transition" />}
                                 </div>
                               );
                             })}
@@ -1637,25 +1358,14 @@ export default function Home() {
           </div>
         )}
 
-        {/* MENU INFERIOR NAVEGAÇÃO */}
-        <nav className={`fixed bottom-0 left-0 right-0 max-w-md mx-auto border-t z-40 transition-colors ${
-          isModoFesta ? 'bg-black/90 border-white/10' : darkMode ? 'bg-slate-950/90 border-slate-800' : 'bg-white/95 border-slate-200'
-        } backdrop-blur-md pb-safe`}>
+        <nav className={`fixed bottom-0 left-0 right-0 max-w-md mx-auto border-t z-40 transition-colors ${isModoFesta ? 'bg-black/90 border-white/10' : darkMode ? 'bg-slate-950/90 border-slate-800' : 'bg-white/95 border-slate-200'} backdrop-blur-md pb-safe`}>
           <ul className="flex justify-around items-center p-2">
             {navItems.map(item => {
               const isActive = abaAtiva === item.id;
               return (
                 <li key={item.id} className="w-full">
-                  <button
-                    onClick={() => setAbaAtiva(item.id)}
-                    className={`w-full flex flex-col items-center justify-center py-2 transition-all rounded-xl ${
-                      isActive 
-                        ? (isModoFesta ? 'text-black bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]' : darkMode ? 'text-amber-400 bg-slate-900' : 'text-amber-600 bg-amber-50') 
-                        : (isModoFesta ? 'text-white/50 hover:text-white' : darkMode ? 'text-slate-500 hover:text-slate-400' : 'text-slate-400 hover:text-slate-600')
-                    }`}
-                  >
-                    <span className={`text-xl mb-1 ${isActive ? 'scale-110' : 'scale-100'} transition-transform duration-200`}>{item.icon}</span>
-                    <span className={`text-[9px] font-bold ${isActive ? 'opacity-100' : 'opacity-70'}`}>{item.label}</span>
+                  <button onClick={() => setAbaAtiva(item.id)} className={`w-full flex flex-col items-center justify-center py-2 transition-all rounded-xl ${isActive ? (isModoFesta ? 'text-black bg-white shadow-[0_0_10px_rgba(255,255,255,0.8)]' : darkMode ? 'text-amber-400 bg-slate-900' : 'text-amber-600 bg-amber-50') : (isModoFesta ? 'text-white/50 hover:text-white' : darkMode ? 'text-slate-500 hover:text-slate-400' : 'text-slate-400 hover:text-slate-600')}`}>
+                    <span className={`text-xl mb-1 ${isActive ? 'scale-110' : 'scale-100'} transition-transform duration-200`}>{item.icon}</span><span className={`text-[9px] font-bold ${isActive ? 'opacity-100' : 'opacity-70'}`}>{item.label}</span>
                   </button>
                 </li>
               );
@@ -1663,56 +1373,25 @@ export default function Home() {
           </ul>
         </nav>
 
-        {/* AVISO CONFIRMAÇÃO DO FIZ MAU */}
         {modalGregorioOpen && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className={`rounded-3xl p-6 text-center max-w-xs shadow-2xl border transform transition-all ${
-              isModoFesta ? 'bg-black border-red-600 text-white' : darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-900'
-            }`}>
-              <div className="text-4xl mb-3">🤮</div>
-              <h3 className="font-black text-red-500 text-lg mb-2">Assumir?</h3>
-              <p className="text-xs font-semibold mb-6 text-slate-400 leading-relaxed">
-                Isto vai adicionar uma mancha permanente no teu perfil do Ranking! Tem a certeza?
-              </p>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => setModalGregorioOpen(false)}
-                  className={`flex-1 py-3 rounded-xl font-bold text-xs border transition ${
-                    isModoFesta ? 'border-white/20 text-white/50 hover:bg-white/10' : darkMode ? 'border-slate-800 text-slate-400 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  Cancelar
-                </button>
-                <button onClick={confirmarGregorio} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-black py-3 rounded-xl text-xs shadow transition active:scale-95">
-                  Sim, fui moleque 🤮
-                </button>
-              </div>
+            <div className={`rounded-3xl p-6 text-center max-w-xs shadow-2xl border transform transition-all ${isModoFesta ? 'bg-black border-red-600 text-white' : darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-900'}`}>
+              <div className="text-4xl mb-3">🤮</div><h3 className="font-black text-red-500 text-lg mb-2">Assumir?</h3><p className="text-xs font-semibold mb-6 text-slate-400 leading-relaxed">Isto vai adicionar uma mancha permanente no teu perfil do Ranking! Tem a certeza?</p>
+              <div className="flex gap-2"><button onClick={() => setModalGregorioOpen(false)} className={`flex-1 py-3 rounded-xl font-bold text-xs border transition ${isModoFesta ? 'border-white/20 text-white/50 hover:bg-white/10' : darkMode ? 'border-slate-800 text-slate-400 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-slate-100'}`}>Cancelar</button><button onClick={confirmarGregorio} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-black py-3 rounded-xl text-xs shadow transition active:scale-95">Sim, fui moleque 🤮</button></div>
             </div>
           </div>
         )}
 
-        {/* MODAL CELEBRAÇÃO */}
         {mensagemModal && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-            <div className={`rounded-3xl p-5 text-center max-w-xs w-full shadow-2xl transform transition-all border overflow-hidden ${
-              isModoFesta ? 'bg-black border-white text-white shadow-[0_0_50px_rgba(255,255,255,0.8)]' : darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-900'
-            }`}>
-              <div className="text-3xl mb-1">{TIPOS_BEBIDA[tipoBebidaSelecionado].emoji}</div>
-              <h3 className={`font-black text-lg mb-1 ${isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isModoFesta ? 'BOOOM!!! 🚀' : 'Registado!'}</h3>
-              
-              {mensagemModal.gifUrl && (
-                <div className="my-3 rounded-2xl overflow-hidden shadow-md max-h-48 border border-slate-700/30 flex items-center justify-center bg-black/20">
-                  <img src={mensagemModal.gifUrl} alt="Sticker do grupo" className="w-full h-full object-cover max-h-48" />
-                </div>
-              )}
-
-              <p className="text-xs font-semibold mb-4 text-slate-400">{mensagemModal.texto}</p>
-              <button onClick={() => setMensagemModal(null)} className={`w-full font-black py-3 rounded-xl shadow transition active:scale-95 ${isModoFesta ? 'bg-white text-black' : 'bg-amber-500 hover:bg-amber-400 text-slate-950'}`}>Siga fiii! 🍻</button>
+            <div className={`rounded-3xl p-5 text-center max-w-xs w-full shadow-2xl transform transition-all border overflow-hidden ${isModoFesta ? 'bg-black border-white text-white shadow-[0_0_50px_rgba(255,255,255,0.8)]' : darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-100 text-slate-900'}`}>
+              <div className="text-3xl mb-1">{TIPOS_BEBIDA[tipoBebidaSelecionado].emoji}</div><h3 className={`font-black text-lg mb-1 ${isModoFesta ? 'text-white' : 'text-amber-500'}`}>{isModoFesta ? 'BOOOM!!! 🚀' : 'Registado!'}</h3>
+              {mensagemModal.gifUrl && <div className="my-3 rounded-2xl overflow-hidden shadow-md max-h-48 border border-slate-700/30 flex items-center justify-center bg-black/20"><img src={mensagemModal.gifUrl} alt="Sticker do grupo" className="w-full h-full object-cover max-h-48" /></div>}
+              <p className="text-xs font-semibold mb-4 text-slate-400">{mensagemModal.texto}</p><button onClick={() => setMensagemModal(null)} className={`w-full font-black py-3 rounded-xl shadow transition active:scale-95 ${isModoFesta ? 'bg-white text-black' : 'bg-amber-500 hover:bg-amber-400 text-slate-950'}`}>Siga fiii! 🍻</button>
             </div>
           </div>
         )}
         
-        {/* MODAL FOTO EXPANDIDA */}
         {fotoExpandida && (
           <div onClick={() => setFotoExpandida(null)} className="fixed inset-0 bg-black/90 flex items-center justify-center p-2 z-[70] cursor-pointer">
             <img src={fotoExpandida} alt="Foto em destaque" className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl object-contain" />
