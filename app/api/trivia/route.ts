@@ -12,9 +12,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const temaFinal = tema && tema.trim() !== '' ? tema.trim() : 'Cultura Geral e Futebol';
+    const temaFinal = tema && tema.trim() !== '' ? tema.trim() : 'Cultura Geral, Futebol e Cerveja';
 
-    // Pedimos à IA uma "keyword_imagem" exata em inglês para usar no Unsplash
     const prompt = `Gera exatamente 10 perguntas cómicas e desafiantes de escolha múltipla em Português de Portugal sobre o tema: "${temaFinal}".
 Podes incluir perguntas em que a imagem é a peça central (ex: "Que animal é este?", "De que jogador/equipa é esta carreira?", "Que monumento ou lugar é este?").
 
@@ -22,15 +21,15 @@ Para cada pergunta, fornece rigorosamente:
 1. "pergunta": Texto da pergunta.
 2. "opcoes": Array com 4 opções de resposta.
 3. "correta": Índice numérico (0 a 3) da resposta correta.
-4. "keyword_imagem": 1 ou 2 palavras-chave muito específicas em INGLÊS que identifiquem a imagem exata da pergunta (ex: "cristiano ronaldo", "golden retriever", "eiffel tower", "beer pint", "fc porto"). Se a pergunta for abstrata, dá uma keyword que combine.
+4. "keyword_imagem": 1 palavra-chave simples e direta em INGLÊS para procurar a imagem (ex: "food", "stadium", "dog", "beer", "soccer").
 
 Responde APENAS no seguinte formato JSON, sem crases, sem texto adicional:
 [
   {
-    "pergunta": "Que jogador corresponde a esta carreira?",
-    "opcoes": ["Sporting CP", "SL Benfica", "FC Porto", "SC Braga"],
-    "correta": 0,
-    "keyword_imagem": "sporting cp"
+    "pergunta": "Qual destas iguarias é devorada à porta dos estádios?",
+    "opcoes": ["Francesinha", "Bifana em pão", "Bacalhau", "Pastel de Nata"],
+    "correta": 1,
+    "keyword_imagem": "food"
   }
 ]`;
 
@@ -59,13 +58,12 @@ Responde APENAS no seguinte formato JSON, sem crases, sem texto adicional:
     }
 
     const rawPerguntas = JSON.parse(textResponse);
-    const seedJogo = Date.now(); // Semente única para esta rodada de 10 perguntas
+    const seedJogo = Math.floor(Math.random() * 10000);
 
-    // Mapear perguntas e injetar o link fixo do Unsplash
+    // Mapear perguntas com LoremFlickr e semente bloqueada para ser igual em todos os telemóveis
     const perguntas = rawPerguntas.map((p: any, idx: number) => {
-      const kw = p.keyword_imagem ? encodeURIComponent(p.keyword_imagem.trim().toLowerCase()) : 'question';
-      // Unsplash usa o parâmetro sig para garantir a mesma imagem para a mesma keyword no mesmo momento
-      const fotoUrl = `https://source.unsplash.com/800x600/?${kw}&sig=${seedJogo + idx}`;
+      const kw = p.keyword_imagem ? encodeURIComponent(p.keyword_imagem.trim().toLowerCase()) : 'food';
+      const fotoUrl = `https://loremflickr.com/800/600/${kw}?lock=${seedJogo + idx}`;
 
       return {
         ...p,
