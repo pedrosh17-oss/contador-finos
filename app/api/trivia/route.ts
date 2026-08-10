@@ -1,5 +1,22 @@
 import { NextResponse } from 'next/server';
 
+// Função para procurar a foto principal oficial na Wikipédia em Português
+async function obterFotoWikipedia(termoWiki: string): Promise<string | null> {
+  try {
+    if (!termoWiki) return null;
+    const termoFormatado = encodeURIComponent(termoWiki.trim().replace(/ /g, '_'));
+    const url = `https://pt.wikipedia.org/api/rest_v1/page/summary/${termoFormatado}`;
+    
+    const res = await fetch(url, { headers: { 'User-Agent': 'ContadorFinosApp/1.0' } });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    return data.thumbnail?.source || data.originalimage?.source || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const { tema } = await req.json();
@@ -15,21 +32,21 @@ export async function POST(req: Request) {
     const temaFinal = tema && tema.trim() !== '' ? tema.trim() : 'Cultura Geral, Futebol e Cerveja';
 
     const prompt = `Gera exatamente 10 perguntas cómicas e desafiantes de escolha múltipla em Português de Portugal sobre o tema: "${temaFinal}".
-Podes incluir perguntas em que a imagem é a peça central (ex: "Que animal é este?", "De que jogador/equipa é esta carreira?", "Que monumento ou lugar é este?").
+Podes fazer perguntas sobre pessoas famosas, futebol, estádios, monumentos, animais, comida portuguesa, cervejas ou cultura geral.
 
-Para cada pergunta, fornece rigorosamente:
+Para cada pergunta, fornece OBRIGATORIAMENTE:
 1. "pergunta": Texto da pergunta.
 2. "opcoes": Array com 4 opções de resposta.
 3. "correta": Índice numérico (0 a 3) da resposta correta.
-4. "keyword_imagem": 1 palavra-chave simples e direta em INGLÊS para procurar a imagem (ex: "food", "stadium", "dog", "beer", "soccer").
+4. "termo_wikipedia": O nome exato em PORTUGUÊS do artigo principal da Wikipédia sobre o assunto/tema da pergunta (ex: "Estádio Municipal de Braga", "Cristiano Ronaldo", "Francesinha", "Elefante", "Super Bock", "Torre de Belém").
 
-Responde APENAS no seguinte formato JSON, sem crases, sem texto adicional:
+Responde APENAS no seguinte formato JSON, sem crases markdown, sem texto adicional:
 [
   {
-    "pergunta": "Qual destas iguarias é devorada à porta dos estádios?",
-    "opcoes": ["Francesinha", "Bifana em pão", "Bacalhau", "Pastel de Nata"],
+    "pergunta": "No Estádio Municipal de Braga, se quiseres comprar bilhete para a bancada atrás da baliza, o que acontece?",
+    "opcoes": ["Cadeira VIP", "Descobres que não há bancada, apenas uma pedreira", "És obrigado a escalar a rocha", "Vês a partir do restaurante"],
     "correta": 1,
-    "keyword_imagem": "food"
+    "termo_wikipedia": "Estádio Municipal de Braga"
   }
 ]`;
 
@@ -60,16 +77,23 @@ Responde APENAS no seguinte formato JSON, sem crases, sem texto adicional:
     const rawPerguntas = JSON.parse(textResponse);
     const seedJogo = Math.floor(Math.random() * 10000);
 
-    // Mapear perguntas com LoremFlickr e semente bloqueada para ser igual em todos os telemóveis
-    const perguntas = rawPerguntas.map((p: any, idx: number) => {
-      const kw = p.keyword_imagem ? encodeURIComponent(p.keyword_imagem.trim().toLowerCase()) : 'food';
-      const fotoUrl = `https://loremflickr.com/800/600/${kw}?lock=${seedJogo + idx}`;
+    // Buscar as imagens reais da Wikipédia em Português
+    const perguntas = await Promise.all(
+      rawPerguntas.map(async (p: any, idx: number) => {
+        let fotoUrl = await obterFotoWikipedia(p.termo_wikipedia);
 
-      return {
-        ...p,
-        fotoUrl
-      };
-    });
+        // Fallback para banco de imagens caso a Wikipédia não tenha foto
+        if (!fotoUrl) {
+          const kw = p.termo_wikipedia ? encodeURIComponent(p.termo_wikipedia.split(' ')[0].toLowerCase()) : 'food';
+          fotoUrl = `https://loremflickr.com/800/600/${kw}?lock=${seedJogo + idx}`;
+        }
+
+        return {
+          ...p,
+          fotoUrl
+        };
+      })
+    );
 
     return NextResponse.json({ perguntas });
   } catch (err: any) {
