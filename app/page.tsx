@@ -2414,7 +2414,7 @@ export default function Home() {
 
                   {/* IMAGEM REAL E FIXA PARA TODOS OS JOGADORES */}
                   {triviaPerguntas[triviaPerguntaIdx].fotoUrl && (
-                    <div className="w-full h-48 sm:h-56 rounded-2xl overflow-hidden mb-4 border-2 border-amber-500/40 shadow-2xl relative bg-slate-900 flex items-center justify-center">
+                    <div className="w-full aspect-video rounded-2xl overflow-hidden mb-4 border-2 border-amber-500/40 shadow-2xl relative bg-slate-900 flex items-center justify-center">
                       <img 
                         src={triviaPerguntas[triviaPerguntaIdx].fotoUrl} 
                         alt="Pergunta Visual" 

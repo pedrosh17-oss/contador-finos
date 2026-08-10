@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 
-// Função para procurar a foto principal oficial na Wikipédia em Português
 async function obterFotoWikipedia(termoWiki: string): Promise<string | null> {
   try {
     if (!termoWiki) return null;
@@ -32,21 +31,24 @@ export async function POST(req: Request) {
     const temaFinal = tema && tema.trim() !== '' ? tema.trim() : 'Cultura Geral, Futebol e Cerveja';
 
     const prompt = `Gera exatamente 10 perguntas cómicas e desafiantes de escolha múltipla em Português de Portugal sobre o tema: "${temaFinal}".
-Podes fazer perguntas sobre pessoas famosas, futebol, estádios, monumentos, animais, comida portuguesa, cervejas ou cultura geral.
+
+Cria um MISTO entre dois tipos de perguntas:
+1. PERGUNTAS DE RECONHECIMENTO VISUAL: ex: "Que estádio/lugar/pessoa é este na imagem?". Neste caso, o "termo_wikipedia" é o próprio objeto a adivinhar.
+2. PERGUNTAS DE CONTEXTO: ex: "Qual o doce típico de Aveiro?". NESTE CASO, O "termo_wikipedia" DEVE SER O CONTEXTO/CIDADE (ex: "Aveiro" ou "Estádio Municipal de Aveiro") E NUNCA A RESPOSTA CORRETA ("Ovos Moles"), PARA NÃO DAR SPOILER DAS OPÇÕES!
 
 Para cada pergunta, fornece OBRIGATORIAMENTE:
 1. "pergunta": Texto da pergunta.
 2. "opcoes": Array com 4 opções de resposta.
 3. "correta": Índice numérico (0 a 3) da resposta correta.
-4. "termo_wikipedia": O nome exato em PORTUGUÊS do artigo principal da Wikipédia sobre o assunto/tema da pergunta (ex: "Estádio Municipal de Braga", "Cristiano Ronaldo", "Francesinha", "Elefante", "Super Bock", "Torre de Belém").
+4. "termo_wikipedia": O termo exato em Português para buscar na Wikipédia.
 
 Responde APENAS no seguinte formato JSON, sem crases markdown, sem texto adicional:
 [
   {
-    "pergunta": "No Estádio Municipal de Braga, se quiseres comprar bilhete para a bancada atrás da baliza, o que acontece?",
-    "opcoes": ["Cadeira VIP", "Descobres que não há bancada, apenas uma pedreira", "És obrigado a escalar a rocha", "Vês a partir do restaurante"],
-    "correta": 1,
-    "termo_wikipedia": "Estádio Municipal de Braga"
+    "pergunta": "Se fores ao Estádio Municipal de Aveiro, qual é a iguaria doce local para afogar as mágoas?",
+    "opcoes": ["Ovos moles de Aveiro", "Torta de Azeitão", "Queijada de Sintra", "Pastel de Nata"],
+    "correta": 0,
+    "termo_wikipedia": "Estádio Municipal de Aveiro"
   }
 ]`;
 
@@ -77,12 +79,10 @@ Responde APENAS no seguinte formato JSON, sem crases markdown, sem texto adicion
     const rawPerguntas = JSON.parse(textResponse);
     const seedJogo = Math.floor(Math.random() * 10000);
 
-    // Buscar as imagens reais da Wikipédia em Português
     const perguntas = await Promise.all(
       rawPerguntas.map(async (p: any, idx: number) => {
         let fotoUrl = await obterFotoWikipedia(p.termo_wikipedia);
 
-        // Fallback para banco de imagens caso a Wikipédia não tenha foto
         if (!fotoUrl) {
           const kw = p.termo_wikipedia ? encodeURIComponent(p.termo_wikipedia.split(' ')[0].toLowerCase()) : 'food';
           fotoUrl = `https://loremflickr.com/800/600/${kw}?lock=${seedJogo + idx}`;
