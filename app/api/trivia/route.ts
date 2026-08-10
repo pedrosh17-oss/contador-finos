@@ -7,7 +7,7 @@ export async function POST(req: Request) {
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'Chave GEMINI_API_KEY não configurada no ficheiro .env.local' },
+        { error: 'Chave GEMINI_API_KEY não encontrada nas variáveis de ambiente' },
         { status: 500 }
       );
     }
@@ -35,18 +35,26 @@ Responde APENAS no seguinte formato JSON sem qualquer texto adicional:
     });
 
     const data = await res.json();
-    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
+    if (!res.ok) {
+      console.error('Erro direto do Google Gemini:', data);
+      return NextResponse.json(
+        { error: data.error?.message || 'Erro na API do Gemini' },
+        { status: res.status }
+      );
+    }
+
+    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!textResponse) {
-      throw new Error('Sem resposta válida da API do Gemini');
+      throw new Error('Resposta vazia da IA');
     }
 
     const perguntas = JSON.parse(textResponse);
     return NextResponse.json({ perguntas });
   } catch (err: any) {
-    console.error('Erro na API de Trivia:', err);
+    console.error('Erro na Rota de Trivia:', err);
     return NextResponse.json(
-      { error: 'Erro ao gerar perguntas com IA', detalhe: err.message },
+      { error: err.message || 'Erro ao gerar perguntas com IA' },
       { status: 500 }
     );
   }
