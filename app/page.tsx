@@ -85,9 +85,6 @@ const SONS_CELEBRACAO = [
   'https://assets.mixkit.co/active_storage/sfx/131.mp3',                
 ];
 
-// ==========================================
-// 🔔 AUXILIARES DE NOTIFICAÇÃO PUSH
-// ==========================================
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -179,7 +176,6 @@ async function comprimirImagem(file: File, maxDimensao = 600, qualidade = 0.8): 
   });
 }
 
-// 📍 AUXILIAR PARA CAPTURAR COORDENADAS GPS
 async function obterLocalizacaoGPS(): Promise<{ lat: number | null; lng: number | null }> {
   return new Promise((resolve) => {
     if (!('geolocation' in navigator)) {
@@ -203,9 +199,6 @@ function formatarFinos(val: number): string {
   return num % 1 === 0 ? num.toString() : num.toFixed(1);
 }
 
-// ==========================================
-// 👑 LÓGICA DE MEDALHAS HISTÓRICAS
-// ==========================================
 function obterAnoSemana(d: Date) {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   const dayNum = date.getUTCDay() || 7;
@@ -234,7 +227,6 @@ function calcularCampeoesHistoricos(finosList: any[]) {
     const ms = obterAnoMes(d);
     const val = f.quantidade_equivalente ?? 1;
     
-    // Ignorar semana/meses em curso
     if (wk !== semanaAtual) {
       if (!semanas[wk]) semanas[wk] = {};
       semanas[wk][f.perfil_id] = (semanas[wk][f.perfil_id] || 0) + val;
@@ -297,16 +289,42 @@ export default function Home() {
   const [fighter1, setFighter1] = useState<string>('');
   const [fighter2, setFighter2] = useState<string>('');
 
+  // 🎲 ABA RODADA & MINI-JOGOS
+  const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo'>('roleta');
   const [presentesMesa, setPresentesMesa] = useState<string[]>([]);
-  const [isSorteandoRodada, setIsSorteandoRodada] = useState(false);
-  const [roletaRodadaId, setRoletaRodadaId] = useState<string | null>(null);
+  const [seletorTelemovelAberto, setSeletorTelemovelAberto] = useState(false);
+
+  // 🎰 ROLETA (3 ROLOS COM ANIMAÇÃO VERTICAL DE CASINO)
+  const [slotSpinning, setSlotSpinning] = useState(false);
+  const [reel1Spinning, setReel1Spinning] = useState(false);
+  const [reel2Spinning, setReel2Spinning] = useState(false);
+  const [reel3Spinning, setReel3Spinning] = useState(false);
+  const [reel1, setReel1] = useState('❓');
+  const [reel2, setReel2] = useState('❓');
+  const [reel3, setReel3] = useState('❓');
   const [vitimaRodada, setVitimaRodada] = useState<any | null>(null);
 
+  // ⏱️ JOGO CRONÓMETRO CEGO MULTIPLAYER
+  const [cronoAlvo, setCronoAlvo] = useState<number>(5.0);
+  const [cronoEmCurso, setCronoEmCurso] = useState(false);
+  const [cronoDisplay, setCronoDisplay] = useState('0.00');
+  const [cronoEscondido, setCronoEscondido] = useState(false);
+  const [cronoResultados, setCronoResultados] = useState<{ id: string; nome: string; tempo: number; erro: number }[]>([]);
+  const [cronoPerdedor, setCronoPerdedor] = useState<any | null>(null);
+
+  // 💣 JOGO COPO DA MORTE MULTIPLAYER
+  const [coposJogo, setCoposJogo] = useState<{ id: number; revelado: boolean; eBomba: boolean; dono?: string }[]>([]);
+  const [copoJogadorAtualIdx, setCpoJogadorAtualIdx] = useState(0);
+  const [copoPerdedor, setCpoPerdedor] = useState<any | null>(null);
+
+  // ABA PERFIL
   const [perfilSelecionadoId, setPerfilSelecionadoId] = useState<string>('');
   const [seletorPerfilAberto, setSeletorPerfilAberto] = useState(false);
 
   const mapRef = useRef<any>(null);
   const clusterGroupRef = useRef<any>(null);
+  const timerIntervalRef = useRef<any>(null);
+  const channelRef = useRef<any>(null);
 
   useEffect(() => {
     fetchDados();
@@ -324,8 +342,48 @@ export default function Home() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'perfis' }, () => { fetchDados(); })
       .subscribe();
 
+    // 📡 CANAL BROADCAST MULTIPLAYER
+    const canalJogos = supabase.channel('sala-jogos-rodada');
+    channelRef.current = canalJogos;
+
+    canalJogos
+      .on('broadcast', { event: 'INICIAR_CRONO' }, ({ payload }) => {
+        setCronoAlvo(payload.alvo);
+        setPresentesMesa(payload.jogadores);
+        setCronoResultados([]);
+        setCronoPerdedor(null);
+        setCronoEmCurso(false);
+        setCronoDisplay('0.00');
+        setCronoEscondido(false);
+        setModoDecisaoRodada('cronometro');
+      })
+      .on('broadcast', { event: 'REGISTO_CRONO' }, ({ payload }) => {
+        setCronoResultados(prev => {
+          const filtrado = prev.filter(p => p.id !== payload.id);
+          return [...filtrado, payload];
+        });
+      })
+      .on('broadcast', { event: 'INICIAR_COPO' }, ({ payload }) => {
+        setCoposJogo(payload.copos);
+        setPresentesMesa(payload.jogadores);
+        setCpoJogadorAtualIdx(0);
+        setCpoPerdedor(null);
+        setModoDecisaoRodada('copo');
+      })
+      .on('broadcast', { event: 'VIRAR_COPO' }, ({ payload }) => {
+        setCoposJogo(prev => prev.map(c => c.id === payload.copoId ? { ...c, revelado: true, dono: payload.nomeJogador } : c));
+        if (payload.eBomba) {
+          setCpoPerdedor({ id: payload.jogadorId, nome: payload.nomeJogador });
+          dispararCelebracao();
+        } else {
+          setCpoJogadorAtualIdx(prev => (prev + 1) % payload.totalJogadores);
+        }
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(canalRealtime);
+      supabase.removeChannel(canalJogos);
     };
   }, []);
 
@@ -335,7 +393,16 @@ export default function Home() {
     }
   }, [selectedUser]);
 
-  // 🗺️ MAPA DE CLUSTERS DE EMOJIS LEAFLET
+  // 🏁 VERIFICAR FIM DO CRONÓMETRO MULTIPLAYER
+  useEffect(() => {
+    if (presentesMesa.length > 0 && cronoResultados.length >= presentesMesa.length && !cronoPerdedor) {
+      const pior = [...cronoResultados].sort((a, b) => b.erro - a.erro)[0];
+      setCronoPerdedor(pior);
+      dispararCelebracao();
+    }
+  }, [cronoResultados, presentesMesa]);
+
+  // 🗺️ MAPA DE CLUSTERS LEAFLET
   useEffect(() => {
     if (abaAtiva !== 'mapa' || typeof window === 'undefined') return;
 
@@ -358,18 +425,10 @@ export default function Home() {
         clusterGroupRef.current = L.markerClusterGroup({
           iconCreateFunction: function(cluster: any) {
             const count = cluster.getChildCount();
-            
             let dim = 'w-11 h-11';
             let numSize = 'text-xs';
-            
-            if (count > 10) {
-              dim = 'w-12 h-12';
-              numSize = 'text-sm';
-            }
-            if (count > 50) {
-              dim = 'w-14 h-14 shadow-[0_0_20px_rgba(245,158,11,0.9)]';
-              numSize = 'text-base';
-            }
+            if (count > 10) { dim = 'w-12 h-12'; numSize = 'text-sm'; }
+            if (count > 50) { dim = 'w-14 h-14 shadow-[0_0_20px_rgba(245,158,11,0.9)]'; numSize = 'text-base'; }
 
             const html = `
               <div class="${dim} bg-amber-500 rounded-full border-2 border-white flex flex-col items-center justify-center font-black text-slate-950 shadow-lg">
@@ -378,12 +437,7 @@ export default function Home() {
               </div>
             `;
 
-            return L.divIcon({ 
-              html: html, 
-              className: 'bg-transparent border-0', 
-              iconSize: [48, 48],
-              iconAnchor: [24, 24]
-            });
+            return L.divIcon({ html: html, className: 'bg-transparent border-0', iconSize: [48, 48], iconAnchor: [24, 24] });
           }
         });
 
@@ -632,13 +686,10 @@ export default function Home() {
     setModalGregorioOpen(true);
   }
 
-  // 🥇 MEDALHAS PERMANENTES (HISTÓRICO DE SEMANAS/MESES PASSADOS)
   const historicoCampeoes = calcularCampeoesHistoricos(finos);
 
   function calcularConquistas(userFinosValidos: any[], userId: string) {
     const list: string[] = [];
-    
-    // Adicionar medalhas permanentes
     const vitsSemana = historicoCampeoes.vitoriasSemana[userId] || 0;
     const vitsMes = historicoCampeoes.vitoriasMes[userId] || 0;
     
@@ -714,7 +765,6 @@ export default function Home() {
     })
     .sort((a, b) => b.count - a.count);
 
-  // CÁLCULO DE STREAKS TOLERANTES (ESPERA PELO FINAL DO DIA)
   const statsStreaks = perfis.map(p => {
     const pFinos = finosValidos.filter(f => f.perfil_id === p.id);
     const diasUnicosMs = Array.from(new Set(pFinos.map(f => new Date(f.data_hora).setHours(0, 0, 0, 0)))).sort((a, b) => a - b);
@@ -774,7 +824,6 @@ export default function Home() {
     if (countDiff > 0) ritmoUsers.push({ id: p.id, nome: p.nome, paceMin: Math.round((totalDiff / countDiff) / 60000) });
   });
 
-  // ⚔️ ESTATÍSTICAS DO FRENTE-A-FRENTE (1V1)
   function getFighterStats(id: string) {
     const pCount = contagemPorPessoa.find(p => p.id === id)?.count || 0;
     const pStreak = statsStreaks.find(s => s.id === id)?.maxStreak || 0;
@@ -791,23 +840,199 @@ export default function Home() {
   const selecionarTodosMesa = () => setPresentesMesa(perfis.map(p => p.id));
   const limparMesa = () => setPresentesMesa([]);
 
-  function sortearQuemPaga() {
-    if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa! 🍻', 'erro'); return; }
-    setIsSorteandoRodada(true); setVitimaRodada(null);
-    let voltas = 0; const maxVoltas = 15 + Math.floor(Math.random() * 10); let currentIdx = 0;
+  // 🎰 LÓGICA DA ROLETA (SEM 'ALGUÉM' + PAUSA DRAMÁTICA)
+  function girarSlotMachine() {
+    if (presentesMesa.length < 2) {
+      mostrarToast('Seleciona pelo menos 2 pessoas na mesa! 🍻', 'erro');
+      return;
+    }
 
-    const tick = () => {
-      const idAtual = presentesMesa[currentIdx];
-      setRoletaRodadaId(idAtual); voltas++;
-      if (voltas < maxVoltas) {
-        currentIdx = (currentIdx + 1) % presentesMesa.length;
-        setTimeout(tick, 50 + (voltas * voltas * 0.8));
+    const nomesNaMesa = presentesMesa
+      .map(id => perfis.find(p => p.id === id)?.nome)
+      .filter((nome): nome is string => Boolean(nome));
+
+    if (nomesNaMesa.length < 2) return;
+
+    setSlotSpinning(true);
+    setReel1Spinning(true);
+    setReel2Spinning(true);
+    setReel3Spinning(true);
+    setVitimaRodada(null);
+
+    const getRandomName = () => nomesNaMesa[Math.floor(Math.random() * nomesNaMesa.length)];
+
+    // 70% hipótese de haver 3 nomes iguais, 30% hipótese de saírem diferentes e ninguém pagar
+    const eMatch = Math.random() < 0.70;
+    const vitimaSort = perfis.find(p => p.id === presentesMesa[Math.floor(Math.random() * presentesMesa.length)]);
+    const nomeVencedor = vitimaSort?.nome || nomesNaMesa[0];
+
+    let finalR1 = nomeVencedor;
+    let finalR2 = nomeVencedor;
+    let finalR3 = nomeVencedor;
+
+    if (!eMatch) {
+      finalR1 = nomesNaMesa[0];
+      finalR2 = nomesNaMesa[1 % nomesNaMesa.length];
+      finalR3 = nomesNaMesa.length > 2 ? nomesNaMesa[2] : nomesNaMesa[0];
+      if (finalR1 === finalR2 && finalR2 === finalR3) {
+        finalR3 = nomesNaMesa[1 % nomesNaMesa.length];
+      }
+    }
+
+    // --- ROLO 1 ---
+    let delay1 = 40;
+    const spinR1 = (elapsed: number) => {
+      if (elapsed < 1400) {
+        setReel1(getRandomName());
+        delay1 = Math.min(220, delay1 * 1.08);
+        setTimeout(() => spinR1(elapsed + delay1), delay1);
       } else {
-        setVitimaRodada(perfis.find(p => p.id === idAtual));
-        setIsSorteandoRodada(false); dispararCelebracao();
+        setReel1(finalR1);
+        setReel1Spinning(false);
       }
     };
-    tick();
+
+    // --- ROLO 2 ---
+    let delay2 = 40;
+    const spinR2 = (elapsed: number) => {
+      if (elapsed < 2400) {
+        setReel2(getRandomName());
+        delay2 = Math.min(280, delay2 * 1.08);
+        setTimeout(() => spinR2(elapsed + delay2), delay2);
+      } else {
+        setReel2(finalR2);
+        setReel2Spinning(false);
+      }
+    };
+
+    // --- ROLO 3 (SUSPENSE FINAL) ---
+    let delay3 = 40;
+    const spinR3 = (elapsed: number) => {
+      if (elapsed < 3600) {
+        setReel3(getRandomName());
+        delay3 = Math.min(450, delay3 * 1.10);
+        setTimeout(() => spinR3(elapsed + delay3), delay3);
+      } else {
+        setReel3(finalR3);
+        setReel3Spinning(false);
+        setSlotSpinning(false);
+
+        // PAUSA DRAMÁTICA DE 800MS PARA TODOS VEREM O 3º ROLO
+        setTimeout(() => {
+          if (eMatch && vitimaSort) {
+            setVitimaRodada(vitimaSort);
+          } else {
+            setVitimaRodada({ id: 'ninguem', nome: 'NINGUÉM PAGA!' });
+          }
+          dispararCelebracao();
+        }, 800);
+      }
+    };
+
+    spinR1(0);
+    spinR2(0);
+    spinR3(0);
+  }
+
+  // ==========================================
+  // ⏱️ LÓGICA DO JOGO 1: CRONÓMETRO MULTIPLAYER
+  // ==========================================
+  function iniciarJogoCronometroMultiplayer() {
+    if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa!', 'erro'); return; }
+    const alvoAcaso = parseFloat((Math.random() * 5 + 3.5).toFixed(2));
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'INICIAR_CRONO',
+      payload: { alvo: alvoAcaso, jogadores: presentesMesa }
+    });
+  }
+
+  function handleBotaoCronometroMultiplayer() {
+    if (!selectedUser) {
+      mostrarToast('Seleciona quem és tu no telemóvel primeiro!', 'erro');
+      return;
+    }
+
+    if (!cronoEmCurso) {
+      setCronoEmCurso(true);
+      setCronoEscondido(false);
+      const agora = Date.now();
+
+      timerIntervalRef.current = setInterval(() => {
+        const decorrido = (Date.now() - agora) / 1000;
+        if (decorrido > 1.2) {
+          setCronoEscondido(true);
+        }
+        setCronoDisplay(decorrido.toFixed(2));
+      }, 30);
+    } else {
+      clearInterval(timerIntervalRef.current);
+      setCronoEmCurso(false);
+      setCronoEscondido(false);
+      
+      const tempoFinal = parseFloat(cronoDisplay);
+      const erro = Math.abs(tempoFinal - cronoAlvo);
+      const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
+
+      const meuResultado = { id: selectedUser, nome: nomeJogador, tempo: tempoFinal, erro };
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'REGISTO_CRONO',
+        payload: meuResultado
+      });
+    }
+  }
+
+  // ==========================================
+  // 💣 LÓGICA DO JOGO 2: COPO DA MORTE MULTIPLAYER
+  // ==========================================
+  function iniciarJogoCopoMultiplayer() {
+    if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa!', 'erro'); return; }
+    
+    const numCopos = Math.max(presentesMesa.length + 2, 6);
+    const bombaIdx = Math.floor(Math.random() * numCopos);
+    
+    const novosCopos = Array.from({ length: numCopos }, (_, i) => ({
+      id: i,
+      revelado: false,
+      eBomba: i === bombaIdx
+    }));
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'INICIAR_COPO',
+      payload: { copos: novosCopos, jogadores: presentesMesa }
+    });
+  }
+
+  function virarCopoMultiplayer(copoId: number) {
+    if (copoPerdedor || !selectedUser) return;
+    
+    const jogadorVezId = presentesMesa[copoJogadorAtualIdx];
+    if (selectedUser !== jogadorVezId) {
+      const nomeVez = perfis.find(p => p.id === jogadorVezId)?.nome;
+      mostrarToast(`Ainda não é a tua vez! É a vez do ${nomeVez}.`, 'erro');
+      return;
+    }
+
+    const copo = coposJogo.find(c => c.id === copoId);
+    if (!copo || copo.revelado) return;
+
+    const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'VIRAR_COPO',
+      payload: {
+        copoId,
+        jogadorId: selectedUser,
+        nomeJogador,
+        eBomba: copo.eBomba,
+        totalJogadores: presentesMesa.length
+      }
+    });
   }
 
   const toggleDia = (dia: string) => setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
@@ -865,12 +1090,24 @@ export default function Home() {
   const mainWrapperClasses = isModoFesta ? 'brutal-bg text-white' : darkMode ? 'bg-slate-950 text-slate-100' : 'bg-amber-50 text-slate-900';
   const cardClasses = isModoFesta ? 'bg-black/60 border border-white/10 backdrop-blur-md shadow-[0_0_20px_rgba(255,255,255,0.1)] text-white' : darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100';
 
+  const meuResultadoCrono = cronoResultados.find(r => r.id === selectedUser);
+
   return (
     <>
       <style>{`
         @keyframes marqueeScroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
         .animate-marquee { display: inline-block; white-space: nowrap; animation: marqueeScroll 8s linear infinite; }
         .custom-cluster-icon { background: transparent; border: none; }
+
+        @keyframes slotVerticalSpin {
+          0% { transform: translateY(-50%); filter: blur(2px); }
+          50% { transform: translateY(0%); filter: blur(3px); }
+          100% { transform: translateY(50%); filter: blur(2px); }
+        }
+        .animate-slot-vertical {
+          animation: slotVerticalSpin 0.12s linear infinite;
+        }
+
         ${isModoFesta ? `
           @keyframes discoBg { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
           @keyframes shakeBrutal { 0% { transform: translate(1px, 1px) rotate(0deg); } 25% { transform: translate(-2px, -2px) rotate(-1deg); } 50% { transform: translate(2px, 2px) rotate(1deg); } 75% { transform: translate(-2px, 1px) rotate(0deg); } 100% { transform: translate(1px, -1px) rotate(-1deg); } }
@@ -949,7 +1186,7 @@ export default function Home() {
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <label className={`block font-bold mb-2 text-sm ${isModoFesta ? 'text-white' : darkMode ? 'text-slate-300' : 'text-slate-700'}`}>{modoRegisto === 'rodada' ? 'Quem vai PAGAR a rodada? 💳' : 'Quem és tu?'}</label>
               <select className={`w-full p-2.5 border rounded-xl font-bold mb-3 outline-none text-sm ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-800'}`} value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)}>
-                <option value="">-- Seleciona o pagador --</option>
+                <option value="">-- Seleciona o teu nome --</option>
                 {perfis.map((p) => (<option key={p.id} value={p.id}>{p.nome}</option>))}
               </select>
 
@@ -1240,48 +1477,331 @@ export default function Home() {
           </div>
         )}
 
-        {/* SORTEADOR DA RODA */}
+        {/* 🎲 ABA RODADA & MINI-JOGOS MULTIPLAYER */}
         {abaAtiva === 'rodada' && (
           <div className="space-y-6">
             <div className={`p-5 rounded-2xl shadow border transition-colors ${cardClasses}`}>
-              <h2 className="font-black text-xl mb-1 flex items-center gap-2">🎲 Sorteador da Rodada</h2>
-              <p className="text-xs text-slate-400 mb-4 leading-relaxed">Seleciona quem está presente na mesa para sortear quem paga a próxima rodada de bebidas!</p>
+              
+              {/* SELETOR DE IDENTIDADE CUSTOMIZADO (GLASSMORPHISM) */}
+              {modoDecisaoRodada !== 'roleta' && (
+                <div className="relative mb-4">
+                  <label className="block text-[10px] font-black uppercase text-amber-500 mb-1 flex items-center gap-1">
+                    📱 Quem está a segurar ESTE telemóvel?
+                  </label>
+                  <button
+                    onClick={() => setSeletorTelemovelAberto(!seletorTelemovelAberto)}
+                    className="w-full p-3 rounded-2xl border border-amber-500/30 bg-slate-900/90 text-white font-black text-xs flex justify-between items-center shadow-lg hover:border-amber-400 transition"
+                  >
+                    <span>{selectedUser ? perfis.find(p => p.id === selectedUser)?.nome : '-- Escolhe o teu nome --'}</span>
+                    <span className="text-amber-500 text-xs">▼</span>
+                  </button>
 
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">Quem está na mesa? ({presentesMesa.length})</span>
-                <div className="flex gap-2 text-[10px] font-bold"><button onClick={selecionarTodosMesa} className="text-amber-500 hover:underline">Todos</button><span className="text-slate-600">|</span><button onClick={limparMesa} className="text-slate-400 hover:underline">Limpar</button></div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 mb-6">
-                {perfis.map(p => {
-                  const isPresente = presentesMesa.includes(p.id);
-                  const isOnRoleta = roletaRodadaId === p.id;
-                  return (
-                    <button key={p.id} onClick={() => toggleMesa(p.id)} className={`p-3 rounded-xl border font-bold text-xs transition flex items-center justify-between ${isOnRoleta ? 'bg-amber-500 text-black border-amber-300 scale-105 shadow-lg' : isPresente ? (isModoFesta ? 'bg-white/20 border-white/40 text-white' : 'bg-amber-500/10 border-amber-500/40 text-amber-400') : (isModoFesta ? 'bg-black/40 border-white/5 text-white/40' : darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-600' : 'bg-slate-100 border-slate-200 text-slate-400')}`}>
-                      <span className="truncate">{p.nome}</span><span>{isPresente ? '✅' : '⚪'}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button onClick={sortearQuemPaga} disabled={isSorteandoRodada || presentesMesa.length < 2} className={`w-full py-4 rounded-xl font-black text-lg shadow-xl transition transform active:scale-95 ${isSorteandoRodada ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : presentesMesa.length >= 2 ? (isModoFesta ? 'bg-gradient-to-r from-red-600 via-pink-600 to-purple-600 text-white border-2 border-yellow-400' : 'bg-amber-500 hover:bg-amber-400 text-slate-950') : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
-                {isSorteandoRodada ? 'A rodar a roleta... 🍻' : '💸 QUEM PAGA A RODADA?'}
-              </button>
-
-              {vitimaRodada && (
-                <div className={`mt-6 p-5 rounded-2xl border text-center relative shadow-2xl animate-bounce ${isModoFesta ? 'bg-red-600 border-yellow-400 text-white' : 'bg-amber-500 text-slate-950 border-amber-300'}`}>
-                  <button onClick={() => setVitimaRodada(null)} className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-black/20 hover:bg-black/40 font-black text-xs flex items-center justify-center transition" title="Fechar resultado">✕</button>
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Parabéns!</p>
-                  <h3 className="text-2xl font-black mt-1">🍻 {vitimaRodada.nome} PAGA A RODADA!</h3>
-                  <p className="text-xs font-semibold mt-1 opacity-90">Oupas! 🍻</p>
-                  <button onClick={() => setVitimaRodada(null)} className="mt-3 px-4 py-1.5 rounded-lg bg-black/20 hover:bg-black/30 font-black text-xs transition">OK / Fechar</button>
+                  {seletorTelemovelAberto && (
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900/95 border border-amber-500/40 rounded-2xl shadow-2xl z-50 max-h-52 overflow-y-auto backdrop-blur-xl p-1 space-y-1">
+                      {perfis.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => { setSelectedUser(p.id); setSeletorTelemovelAberto(false); }}
+                          className={`w-full p-2.5 rounded-xl text-left text-xs font-bold transition flex justify-between items-center ${selectedUser === p.id ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-200 hover:bg-slate-800'}`}
+                        >
+                          <span>{p.nome}</span>
+                          {selectedUser === p.id && <span>✅</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* SUB-NAVEGAÇÃO DE MODO DE DECISÃO */}
+              <div className={`p-1 rounded-xl border flex gap-1 mb-4 ${isModoFesta ? 'bg-black/50 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+                <button
+                  onClick={() => setModoDecisaoRodada('roleta')}
+                  className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition ${modoDecisaoRodada === 'roleta' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                  🎰 Roleta
+                </button>
+                <button
+                  onClick={() => setModoDecisaoRodada('cronometro')}
+                  className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition ${modoDecisaoRodada === 'cronometro' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                  ⏱️ Cronómetro
+                </button>
+                <button
+                  onClick={() => setModoDecisaoRodada('copo')}
+                  className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition ${modoDecisaoRodada === 'copo' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                  💣 Copo Morte
+                </button>
+              </div>
+
+              {/* SELEÇÃO DA MESA (COMUM A TODOS OS JOGOS) */}
+              <div className="mb-4">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">
+                    Quem está na mesa? ({presentesMesa.length})
+                  </span>
+                  <div className="flex gap-2 text-[10px] font-bold">
+                    <button onClick={selecionarTodosMesa} className="text-amber-500 hover:underline">Todos</button>
+                    <span className="text-slate-600">|</span>
+                    <button onClick={limparMesa} className="text-slate-400 hover:underline">Limpar</button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {perfis.map(p => {
+                    const isPresente = presentesMesa.includes(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => toggleMesa(p.id)}
+                        className={`p-2.5 rounded-xl border font-bold text-xs transition flex items-center justify-between ${
+                          isPresente
+                            ? (isModoFesta ? 'bg-white/20 border-white/40 text-white' : 'bg-amber-500/10 border-amber-500/40 text-amber-400')
+                            : (isModoFesta ? 'bg-black/40 border-white/5 text-white/40' : darkMode ? 'bg-slate-950/40 border-slate-800 text-slate-600' : 'bg-slate-100 border-slate-200 text-slate-400')
+                        }`}
+                      >
+                        <span className="truncate">{p.nome}</span>
+                        <span>{isPresente ? '✅' : '⚪'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* OPÇÃO 1: ROLETA COM 3 ROLOS VERTICAIS 🎰 */}
+              {modoDecisaoRodada === 'roleta' && (
+                <div className="mt-4 pt-4 border-t border-slate-800/50 space-y-4">
+                  
+                  <div className={`p-4 rounded-2xl border shadow-2xl ${darkMode ? 'bg-black/80 border-slate-800' : 'bg-amber-100/50 border-amber-200'}`}>
+                    <p className="text-[10px] font-black uppercase text-amber-500 tracking-widest text-center mb-3">
+                      🎰 ROLETA
+                    </p>
+
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="h-20 bg-slate-900 border-2 border-amber-500/50 rounded-xl flex items-center justify-center p-1 shadow-inner overflow-hidden relative">
+                        <span className={`text-xs font-black text-amber-400 truncate w-full ${reel1Spinning ? 'animate-slot-vertical' : ''}`}>
+                          {reel1}
+                        </span>
+                      </div>
+                      <div className="h-20 bg-slate-900 border-2 border-amber-500/50 rounded-xl flex items-center justify-center p-1 shadow-inner overflow-hidden relative">
+                        <span className={`text-xs font-black text-amber-400 truncate w-full ${reel2Spinning ? 'animate-slot-vertical' : ''}`}>
+                          {reel2}
+                        </span>
+                      </div>
+                      <div className="h-20 bg-slate-900 border-2 border-amber-500/50 rounded-xl flex items-center justify-center p-1 shadow-inner overflow-hidden relative">
+                        <span className={`text-xs font-black text-amber-400 truncate w-full ${reel3Spinning ? 'animate-slot-vertical' : ''}`}>
+                          {reel3}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={girarSlotMachine}
+                    disabled={slotSpinning || presentesMesa.length < 2}
+                    className={`w-full py-4 rounded-2xl font-black text-lg shadow-xl transition transform active:scale-95 ${
+                      slotSpinning 
+                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        : presentesMesa.length >= 2
+                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                          : 'bg-slate-800 text-slate-600 cursor-not-allowed'
+                    }`}
+                  >
+                    {slotSpinning ? 'A girar a roleta... 🎰' : '🎰 RODAR'}
+                  </button>
+
+                  {/* POP-UP MODAL DE RESULTADO TIPO CASINO */}
+                  {vitimaRodada && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-[80] animate-fadeIn">
+                      <div className={`w-full max-w-xs rounded-3xl p-6 text-center border-2 shadow-2xl transform transition-all scale-105 ${
+                        vitimaRodada.id === 'ninguem' 
+                          ? 'bg-slate-950 border-emerald-500 text-white shadow-emerald-500/20' 
+                          : 'bg-slate-950 border-amber-500 text-white shadow-amber-500/30'
+                      }`}>
+                        <div className="text-5xl mb-3 animate-bounce">
+                          {vitimaRodada.id === 'ninguem' ? '🍀' : '💳'}
+                        </div>
+                        
+                        {vitimaRodada.id === 'ninguem' ? (
+                          <>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                              SAFARAM-SE TODOS!
+                            </p>
+                            <h3 className="text-2xl font-black mt-2 text-white">
+                              NINGUÉM PAGA!
+                            </h3>
+                          </>
+                        ) : (
+                          <h3 className="text-3xl font-black mt-2 text-white">
+                            {vitimaRodada.nome}
+                          </h3>
+                        )}
+
+                        <button 
+                          onClick={() => setVitimaRodada(null)} 
+                          className="mt-6 w-full py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm shadow-lg transition active:scale-95"
+                        >
+                          {vitimaRodada.id === 'ninguem' ? 'Tenta outra vez' : 'Ai que sede!'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* OPÇÃO 2: CRONÓMETRO CEGO (MULTIPLAYER SIMULTÂNEO) */}
+              {modoDecisaoRodada === 'cronometro' && (
+                <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
+                  <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <p className="text-[10px] font-black uppercase text-amber-500 tracking-wider">🎯 Tempo Alvo Sincronizado</p>
+                    <p className="text-3xl font-black mt-1 text-white">{cronoAlvo.toFixed(2)}s</p>
+                    <p className="text-[10px] text-amber-400/90 font-bold mt-1">Ai que sede!!</p>
+                  </div>
+
+                  {presentesMesa.length >= 2 ? (
+                    <>
+                      <button
+                        onClick={iniciarJogoCronometroMultiplayer}
+                        className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition active:scale-95"
+                      >
+                        🚀 Iniciar Novo Jogo para Todos os Telemóveis
+                      </button>
+
+                      {!cronoPerdedor && (
+                        <div className="space-y-3 pt-2">
+                          <div className="h-20 flex items-center justify-center bg-black/40 rounded-2xl border border-slate-800">
+                            <span className="text-4xl font-black tracking-widest text-amber-500">
+                              {cronoEscondido ? '??:??' : `${cronoDisplay}s`}
+                            </span>
+                          </div>
+
+                          {!meuResultadoCrono ? (
+                            <button
+                              onClick={handleBotaoCronometroMultiplayer}
+                              disabled={!selectedUser}
+                              className={`w-full py-4 rounded-xl font-black text-xl shadow-xl transition transform active:scale-95 ${
+                                !selectedUser 
+                                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                  : cronoEmCurso 
+                                    ? 'bg-red-600 hover:bg-red-500 text-white' 
+                                    : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                              }`}
+                            >
+                              {!selectedUser 
+                                ? '⚠️ Seleciona o teu nome acima' 
+                                : cronoEmCurso 
+                                  ? '🛑 PARAR!' 
+                                  : '▶️ O MEU CRONÓMETRO'}
+                            </button>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold text-xs">
+                              ✅ Paraste aos {meuResultadoCrono.tempo.toFixed(2)}s (Erro: {meuResultadoCrono.erro.toFixed(2)}s).<br/>
+                              <span className="text-[10px] opacity-80 text-white">A aguardar pelos restantes jogadores...</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5 text-left pt-2">
+                        <p className="text-[10px] font-bold uppercase text-slate-400">Estado da Mesa ({cronoResultados.length}/{presentesMesa.length}):</p>
+                        {presentesMesa.map(pId => {
+                          const pNome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
+                          const res = cronoResultados.find(r => r.id === pId);
+                          return (
+                            <div key={pId} className="flex justify-between items-center text-xs p-2 rounded-lg bg-black/30 border border-slate-800">
+                              <span className="font-bold">{pNome}</span>
+                              {res ? (
+                                <span className="text-emerald-400 font-bold">✅ Concluído ({res.tempo.toFixed(2)}s)</span>
+                              ) : (
+                                <span className="text-amber-500/70 font-semibold italic animate-pulse">⏳ A jogar...</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {cronoPerdedor && (
+                        <div className="mt-4 p-5 rounded-2xl border text-center shadow-2xl bg-red-600 border-yellow-400 text-white animate-bounce">
+                          <p className="text-[10px] font-black uppercase tracking-widest opacity-80">💸 Perdeu o Jogo!</p>
+                          <h3 className="text-2xl font-black mt-1">🍺 {cronoPerdedor.nome} PAGA A RODADA!</h3>
+                          <p className="text-xs font-bold mt-1 opacity-90">Errou por {cronoPerdedor.erro.toFixed(2)} segundos!</p>
+                          <button onClick={iniciarJogoCronometroMultiplayer} className="mt-3 px-4 py-2 rounded-xl bg-black/30 hover:bg-black/50 font-black text-xs transition">🔄 Jogar Outra Vez</button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-500 py-2">Seleciona pelo menos 2 pessoas na mesa para jogar!</p>
+                  )}
+                </div>
+              )}
+
+              {/* OPÇÃO 3: COPO DA MORTE (MULTIPLAYER SIMULTÂNEO) */}
+              {modoDecisaoRodada === 'copo' && (
+                <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
+                  {presentesMesa.length >= 2 ? (
+                    <>
+                      <button
+                        onClick={iniciarJogoCopoMultiplayer}
+                        className="w-full py-4 rounded-xl font-black text-lg shadow-xl transition transform active:scale-95 bg-amber-500 text-slate-950 hover:bg-amber-400"
+                      >
+                        💣 PREPARAR E SINCRONIZAR COPOS
+                      </button>
+
+                      {coposJogo.length > 0 && (
+                        <>
+                          {!copoPerdedor && (
+                            <p className="text-xs font-bold text-amber-400">
+                              Vez de escolher: <span className="text-white text-sm font-black">{perfis.find(p => p.id === presentesMesa[copoJogadorAtualIdx])?.nome}</span>
+                            </p>
+                          )}
+
+                          <div className="grid grid-cols-3 gap-3 my-4">
+                            {coposJogo.map(c => {
+                              const eMinhaVez = selectedUser === presentesMesa[copoJogadorAtualIdx];
+                              return (
+                                <button
+                                  key={c.id}
+                                  onClick={() => virarCopoMultiplayer(c.id)}
+                                  disabled={c.revelado || !!copoPerdedor || !eMinhaVez}
+                                  className={`h-24 rounded-2xl border-2 font-black text-3xl transition flex flex-col items-center justify-center gap-1 shadow-md ${
+                                    c.revelado
+                                      ? c.eBomba
+                                        ? 'bg-red-600 border-yellow-400 text-white animate-ping'
+                                        : 'bg-emerald-950/40 border-emerald-600 text-emerald-400 opacity-60'
+                                      : eMinhaVez 
+                                        ? 'bg-slate-900 border-amber-500 hover:scale-105 active:scale-95' 
+                                        : 'bg-slate-950 border-slate-800 opacity-50 cursor-not-allowed'
+                                  }`}
+                                >
+                                  <span>{c.revelado ? (c.eBomba ? '💣' : '🍺') : '🥃'}</span>
+                                  {c.dono && <span className="text-[8px] truncate max-w-[60px] font-bold text-slate-300">{c.dono}</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {copoPerdedor && (
+                            <div className="mt-4 p-5 rounded-2xl border text-center shadow-2xl bg-red-600 border-yellow-400 text-white animate-bounce">
+                              <p className="text-[10px] font-black uppercase tracking-widest opacity-80">💣 BOOM! Encontrou o Copo com Bomba!</p>
+                              <h3 className="text-2xl font-black mt-1">🍻 {copoPerdedor.nome} PAGA A RODADA!</h3>
+                              <button onClick={iniciarJogoCopoMultiplayer} className="mt-3 px-4 py-2 rounded-xl bg-black/30 hover:bg-black/50 font-black text-xs transition">🔄 Jogar Outra Vez</button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-500 py-2">Seleciona pelo menos 2 pessoas na mesa para jogar!</p>
+                  )}
+                </div>
+              )}
+
             </div>
           </div>
         )}
 
-        {/* 🗺️ MAPA MUNDIAL DE CLUSTERS */}
+        {/* MAPA MUNDIAL DE CLUSTERS */}
         {abaAtiva === 'mapa' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
