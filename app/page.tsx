@@ -290,7 +290,7 @@ export default function Home() {
   const [fighter2, setFighter2] = useState<string>('');
 
   // 🎲 ABA RODADA & MINI-JOGOS
-  const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo'>('roleta');
+  const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo' | 'reacao'>('roleta');
   const [presentesMesa, setPresentesMesa] = useState<string[]>([]);
   const [seletorTelemovelAberto, setSeletorTelemovelAberto] = useState(false);
 
@@ -317,6 +317,12 @@ export default function Home() {
   const [copoJogadorAtualIdx, setCpoJogadorAtualIdx] = useState(0);
   const [copoPerdedor, setCpoPerdedor] = useState<any | null>(null);
 
+  // ⚡ JOGO TESTE DE SOBRIEDADE (REAÇÃO RÁPIDA)
+  const [reacaoEstado, setReacaoEstado] = useState<'espera' | 'preparar' | 'verde' | 'concluido'>('espera');
+  const [reacaoStartTime, setReacaoStartTime] = useState<number | null>(null);
+  const [reacaoResultados, setReacaoResultados] = useState<{ id: string; nome: string; tempoMs: number | null; falsaPartida: boolean }[]>([]);
+  const [reacaoPerdedor, setReacaoPerdedor] = useState<any | null>(null);
+
   // ABA PERFIL
   const [perfilSelecionadoId, setPerfilSelecionadoId] = useState<string>('');
   const [seletorPerfilAberto, setSeletorPerfilAberto] = useState(false);
@@ -325,6 +331,7 @@ export default function Home() {
   const clusterGroupRef = useRef<any>(null);
   const timerIntervalRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
+  const reacaoTimerRef = useRef<any>(null);
 
   useEffect(() => {
     fetchDados();
@@ -379,11 +386,31 @@ export default function Home() {
           setCpoJogadorAtualIdx(prev => (prev + 1) % payload.totalJogadores);
         }
       })
+      .on('broadcast', { event: 'INICIAR_REACAO' }, ({ payload }) => {
+        setPresentesMesa(payload.jogadores);
+        setReacaoResultados([]);
+        setReacaoPerdedor(null);
+        setReacaoEstado('preparar');
+        setModoDecisaoRodada('reacao');
+
+        if (reacaoTimerRef.current) clearTimeout(reacaoTimerRef.current);
+        reacaoTimerRef.current = setTimeout(() => {
+          setReacaoEstado('verde');
+          setReacaoStartTime(Date.now());
+        }, payload.delay);
+      })
+      .on('broadcast', { event: 'REGISTO_REACAO' }, ({ payload }) => {
+        setReacaoResultados(prev => {
+          const filtrado = prev.filter(p => p.id !== payload.id);
+          return [...filtrado, payload];
+        });
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(canalRealtime);
       supabase.removeChannel(canalJogos);
+      if (reacaoTimerRef.current) clearTimeout(reacaoTimerRef.current);
     };
   }, []);
 
@@ -401,6 +428,21 @@ export default function Home() {
       dispararCelebracao();
     }
   }, [cronoResultados, presentesMesa]);
+
+  // ⚡ VERIFICAR FIM DO TESTE DE REAÇÃO MULTIPLAYER
+  useEffect(() => {
+    if (presentesMesa.length > 0 && reacaoResultados.length >= presentesMesa.length && !reacaoPerdedor) {
+      const falsas = reacaoResultados.filter(r => r.falsaPartida);
+      let pior: any = null;
+      if (falsas.length > 0) {
+        pior = falsas[0];
+      } else {
+        pior = [...reacaoResultados].sort((a, b) => (b.tempoMs || 0) - (a.tempoMs || 0))[0];
+      }
+      setReacaoPerdedor(pior);
+      dispararCelebracao();
+    }
+  }, [reacaoResultados, presentesMesa]);
 
   // 🗺️ MAPA DE CLUSTERS LEAFLET
   useEffect(() => {
@@ -840,7 +882,7 @@ export default function Home() {
   const selecionarTodosMesa = () => setPresentesMesa(perfis.map(p => p.id));
   const limparMesa = () => setPresentesMesa([]);
 
-  // 🎰 LÓGICA DA ROLETA (SEM 'ALGUÉM' + PAUSA DRAMÁTICA DE 800MS)
+  // 🎰 LÓGICA DA ROLETA
   function girarSlotMachine() {
     if (presentesMesa.length < 2) {
       mostrarToast('Seleciona pelo menos 2 pessoas na mesa! 🍻', 'erro');
@@ -861,7 +903,6 @@ export default function Home() {
 
     const getRandomName = () => nomesNaMesa[Math.floor(Math.random() * nomesNaMesa.length)];
 
-    // 70% hipótese de haver 3 nomes iguais, 30% hipótese de saírem diferentes e ninguém pagar
     const eMatch = Math.random() < 0.70;
     const vitimaSort = perfis.find(p => p.id === presentesMesa[Math.floor(Math.random() * presentesMesa.length)]);
     const nomeVencedor = vitimaSort?.nome || nomesNaMesa[0];
@@ -879,7 +920,6 @@ export default function Home() {
       }
     }
 
-    // --- ROLO 1 ---
     let delay1 = 40;
     const spinR1 = (elapsed: number) => {
       if (elapsed < 1400) {
@@ -892,7 +932,6 @@ export default function Home() {
       }
     };
 
-    // --- ROLO 2 ---
     let delay2 = 40;
     const spinR2 = (elapsed: number) => {
       if (elapsed < 2400) {
@@ -905,7 +944,6 @@ export default function Home() {
       }
     };
 
-    // --- ROLO 3 (SUSPENSE FINAL) ---
     let delay3 = 40;
     const spinR3 = (elapsed: number) => {
       if (elapsed < 3600) {
@@ -917,7 +955,6 @@ export default function Home() {
         setReel3Spinning(false);
         setSlotSpinning(false);
 
-        // PAUSA DRAMÁTICA DE 800MS PARA TODOS VEREM O RESULTADO NO ECRÃ ANTES DO POP-UP
         setTimeout(() => {
           if (eMatch && vitimaSort) {
             setVitimaRodada(vitimaSort);
@@ -941,7 +978,6 @@ export default function Home() {
     if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa!', 'erro'); return; }
     const alvoAcaso = parseFloat((Math.random() * 5 + 3.5).toFixed(2));
 
-    // 1. Atualizar imediatamente no dispositivo local
     setCronoAlvo(alvoAcaso);
     setCronoResultados([]);
     setCronoPerdedor(null);
@@ -949,7 +985,6 @@ export default function Home() {
     setCronoDisplay('0.00');
     setCronoEscondido(false);
 
-    // 2. Enviar broadcast para os outros
     channelRef.current?.send({
       type: 'broadcast',
       event: 'INICIAR_CRONO',
@@ -986,13 +1021,11 @@ export default function Home() {
 
       const meuResultado = { id: selectedUser, nome: nomeJogador, tempo: tempoFinal, erro };
 
-      // 1. Atualizar localmente no próprio telemóvel
       setCronoResultados(prev => {
         const filtrado = prev.filter(p => p.id !== selectedUser);
         return [...filtrado, meuResultado];
       });
 
-      // 2. Enviar broadcast para os restantes
       channelRef.current?.send({
         type: 'broadcast',
         event: 'REGISTO_CRONO',
@@ -1016,12 +1049,10 @@ export default function Home() {
       eBomba: i === bombaIdx
     }));
 
-    // 1. Atualizar localmente
     setCoposJogo(novosCopos);
     setCpoJogadorAtualIdx(0);
     setCpoPerdedor(null);
 
-    // 2. Enviar broadcast para os restantes
     channelRef.current?.send({
       type: 'broadcast',
       event: 'INICIAR_COPO',
@@ -1044,7 +1075,6 @@ export default function Home() {
 
     const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
 
-    // 1. Atualizar localmente
     setCoposJogo(prev => prev.map(c => c.id === copoId ? { ...c, revelado: true, dono: nomeJogador } : c));
     if (copo.eBomba) {
       setCpoPerdedor({ id: selectedUser, nome: nomeJogador });
@@ -1053,7 +1083,6 @@ export default function Home() {
       setCpoJogadorAtualIdx(prev => (prev + 1) % presentesMesa.length);
     }
 
-    // 2. Broadcast para os outros
     channelRef.current?.send({
       type: 'broadcast',
       event: 'VIRAR_COPO',
@@ -1065,6 +1094,61 @@ export default function Home() {
         totalJogadores: presentesMesa.length
       }
     });
+  }
+
+  // ==========================================
+  // ⚡ LÓGICA DO JOGO 3: TESTE DE REAÇÃO MULTIPLAYER
+  // ==========================================
+  function iniciarJogoReacaoMultiplayer() {
+    if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa!', 'erro'); return; }
+    const delayAcaso = Math.floor(Math.random() * 3500) + 2000;
+
+    setReacaoResultados([]);
+    setReacaoPerdedor(null);
+    setReacaoEstado('preparar');
+
+    if (reacaoTimerRef.current) clearTimeout(reacaoTimerRef.current);
+    reacaoTimerRef.current = setTimeout(() => {
+      setReacaoEstado('verde');
+      setReacaoStartTime(Date.now());
+    }, delayAcaso);
+
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'INICIAR_REACAO',
+      payload: { delay: delayAcaso, jogadores: presentesMesa }
+    });
+  }
+
+  function handleToqueReacao() {
+    if (!selectedUser) {
+      mostrarToast('Seleciona quem és tu no telemóvel primeiro!', 'erro');
+      return;
+    }
+    const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
+
+    if (reacaoEstado === 'preparar') {
+      const meuResultado = { id: selectedUser, nome: nomeJogador, tempoMs: null, falsaPartida: true };
+      setReacaoResultados(prev => [...prev.filter(p => p.id !== selectedUser), meuResultado]);
+      setReacaoEstado('concluido');
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'REGISTO_REACAO',
+        payload: meuResultado
+      });
+    } else if (reacaoEstado === 'verde' && reacaoStartTime) {
+      const tempoMs = Date.now() - reacaoStartTime;
+      const meuResultado = { id: selectedUser, nome: nomeJogador, tempoMs, falsaPartida: false };
+      setReacaoResultados(prev => [...prev.filter(p => p.id !== selectedUser), meuResultado]);
+      setReacaoEstado('concluido');
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'REGISTO_REACAO',
+        payload: meuResultado
+      });
+    }
   }
 
   const toggleDia = (dia: string) => setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
@@ -1123,6 +1207,7 @@ export default function Home() {
   const cardClasses = isModoFesta ? 'bg-black/60 border border-white/10 backdrop-blur-md shadow-[0_0_20px_rgba(255,255,255,0.1)] text-white' : darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-100';
 
   const meuResultadoCrono = cronoResultados.find(r => r.id === selectedUser);
+  const meuResultadoReacao = reacaoResultados.find(r => r.id === selectedUser);
 
   return (
     <>
@@ -1546,24 +1631,30 @@ export default function Home() {
               )}
 
               {/* SUB-NAVEGAÇÃO DE MODO DE DECISÃO */}
-              <div className={`p-1 rounded-xl border flex gap-1 mb-4 ${isModoFesta ? 'bg-black/50 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+              <div className={`p-1 rounded-xl border flex gap-1 mb-4 overflow-x-auto ${isModoFesta ? 'bg-black/50 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
                 <button
                   onClick={() => setModoDecisaoRodada('roleta')}
-                  className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition ${modoDecisaoRodada === 'roleta' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'roleta' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
                 >
                   🎰 Roleta
                 </button>
                 <button
                   onClick={() => setModoDecisaoRodada('cronometro')}
-                  className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition ${modoDecisaoRodada === 'cronometro' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'cronometro' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
                 >
                   ⏱️ Cronómetro
                 </button>
                 <button
                   onClick={() => setModoDecisaoRodada('copo')}
-                  className={`flex-1 py-2 rounded-lg font-black text-[10px] uppercase transition ${modoDecisaoRodada === 'copo' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                  className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'copo' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
                 >
                   💣 Copo Morte
+                </button>
+                <button
+                  onClick={() => setModoDecisaoRodada('reacao')}
+                  className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'reacao' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}
+                >
+                  ⚡ Reação
                 </button>
               </div>
 
@@ -1821,6 +1912,101 @@ export default function Home() {
                             </div>
                           )}
                         </>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-500 py-2">Seleciona pelo menos 2 pessoas na mesa para jogar!</p>
+                  )}
+                </div>
+              )}
+
+              {/* OPÇÃO 4: TESTE DE REAÇÃO (MULTIPLAYER SIMULTÂNEO) ⚡ */}
+              {modoDecisaoRodada === 'reacao' && (
+                <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
+                  {presentesMesa.length >= 2 ? (
+                    <>
+                      <button
+                        onClick={iniciarJogoReacaoMultiplayer}
+                        className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition active:scale-95"
+                      >
+                        ⚡ Iniciar Teste de Reação para Todos
+                      </button>
+
+                      {!reacaoPerdedor && (
+                        <div className="space-y-3 pt-2">
+                          {reacaoEstado === 'espera' && (
+                            <p className="text-xs text-slate-400 py-2">Clica em iniciar acima quando todos estiverem com o telemóvel na mão!</p>
+                          )}
+
+                          {(reacaoEstado === 'preparar' || reacaoEstado === 'verde') && (
+                            <button
+                              onClick={handleToqueReacao}
+                              className={`w-full h-44 rounded-3xl font-black text-2xl shadow-2xl transition-colors duration-100 transform active:scale-95 flex flex-col items-center justify-center p-4 ${
+                                reacaoEstado === 'preparar'
+                                  ? 'bg-red-600 text-white border-4 border-red-400 animate-pulse'
+                                  : 'bg-emerald-500 text-slate-950 border-4 border-emerald-300 shadow-[0_0_40px_rgba(16,185,129,0.8)]'
+                              }`}
+                            >
+                              <span>{reacaoEstado === 'preparar' ? '🛑 PREPARAR...' : '⚡ TOCA AGORA!!!'}</span>
+                              <span className="text-xs font-semibold mt-2 opacity-80">
+                                {reacaoEstado === 'preparar' ? 'NÃO TOCAR AINDA!' : 'Manda o dedo!'}
+                              </span>
+                            </button>
+                          )}
+
+                          {meuResultadoReacao && (
+                            <div className={`p-3 rounded-xl border text-xs font-bold ${
+                              meuResultadoReacao.falsaPartida 
+                                ? 'bg-red-500/20 border-red-500/40 text-red-400' 
+                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                            }`}>
+                              {meuResultadoReacao.falsaPartida ? (
+                                <span>❌ Falsa partida! Tocaste antes de ficar verde!</span>
+                              ) : (
+                                <span>⚡ Reagiste em {meuResultadoReacao.tempoMs} ms!</span>
+                              )}
+                              <br/>
+                              <span className="text-[10px] opacity-80 text-white">A aguardar pelos restantes...</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5 text-left pt-2">
+                        <p className="text-[10px] font-bold uppercase text-slate-400">Estado da Mesa ({reacaoResultados.length}/{presentesMesa.length}):</p>
+                        {presentesMesa.map(pId => {
+                          const pNome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
+                          const res = reacaoResultados.find(r => r.id === pId);
+                          return (
+                            <div key={pId} className="flex justify-between items-center text-xs p-2 rounded-lg bg-black/30 border border-slate-800">
+                              <span className="font-bold">{pNome}</span>
+                              {res ? (
+                                res.falsaPartida ? (
+                                  <span className="text-red-400 font-bold">❌ Falsa Partida</span>
+                                ) : (
+                                  <span className="text-emerald-400 font-bold">✅ {res.tempoMs} ms</span>
+                                )
+                              ) : (
+                                <span className="text-amber-500/70 font-semibold italic animate-pulse">⏳ A reagir...</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {reacaoPerdedor && (
+                        <div className="mt-4 p-5 rounded-2xl border text-center shadow-2xl bg-red-600 border-yellow-400 text-white animate-bounce">
+                          <p className="text-[10px] font-black uppercase tracking-widest opacity-80">
+                            {reacaoPerdedor.falsaPartida ? '❌ FALSA PARTIDA!' : '🐢 REFLEXOS DE TARTARUGA!'}
+                          </p>
+                          <h3 className="text-2xl font-black mt-1">🍺 {reacaoPerdedor.nome} PAGA A RODADA!</h3>
+                          <p className="text-xs font-bold mt-1 opacity-90">
+                            {reacaoPerdedor.falsaPartida 
+                              ? 'Tocou antes do ecrã ficar verde!' 
+                              : `Foi o mais lento com ${reacaoPerdedor.tempoMs} ms!`}
+                          </p>
+                          <button onClick={iniciarJogoReacaoMultiplayer} className="mt-3 px-4 py-2 rounded-xl bg-black/30 hover:bg-black/50 font-black text-xs transition">🔄 Jogar Outra Vez</button>
+                        </div>
                       )}
                     </>
                   ) : (
