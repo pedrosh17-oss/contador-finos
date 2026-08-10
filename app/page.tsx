@@ -840,7 +840,7 @@ export default function Home() {
   const selecionarTodosMesa = () => setPresentesMesa(perfis.map(p => p.id));
   const limparMesa = () => setPresentesMesa([]);
 
-  // 🎰 LÓGICA DA ROLETA (SEM 'ALGUÉM' + PAUSA DRAMÁTICA)
+  // 🎰 LÓGICA DA ROLETA (SEM 'ALGUÉM' + PAUSA DRAMÁTICA DE 800MS)
   function girarSlotMachine() {
     if (presentesMesa.length < 2) {
       mostrarToast('Seleciona pelo menos 2 pessoas na mesa! 🍻', 'erro');
@@ -917,7 +917,7 @@ export default function Home() {
         setReel3Spinning(false);
         setSlotSpinning(false);
 
-        // PAUSA DRAMÁTICA DE 800MS PARA TODOS VEREM O 3º ROLO
+        // PAUSA DRAMÁTICA DE 800MS PARA TODOS VEREM O RESULTADO NO ECRÃ ANTES DO POP-UP
         setTimeout(() => {
           if (eMatch && vitimaSort) {
             setVitimaRodada(vitimaSort);
@@ -941,6 +941,15 @@ export default function Home() {
     if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa!', 'erro'); return; }
     const alvoAcaso = parseFloat((Math.random() * 5 + 3.5).toFixed(2));
 
+    // 1. Atualizar imediatamente no dispositivo local
+    setCronoAlvo(alvoAcaso);
+    setCronoResultados([]);
+    setCronoPerdedor(null);
+    setCronoEmCurso(false);
+    setCronoDisplay('0.00');
+    setCronoEscondido(false);
+
+    // 2. Enviar broadcast para os outros
     channelRef.current?.send({
       type: 'broadcast',
       event: 'INICIAR_CRONO',
@@ -977,6 +986,13 @@ export default function Home() {
 
       const meuResultado = { id: selectedUser, nome: nomeJogador, tempo: tempoFinal, erro };
 
+      // 1. Atualizar localmente no próprio telemóvel
+      setCronoResultados(prev => {
+        const filtrado = prev.filter(p => p.id !== selectedUser);
+        return [...filtrado, meuResultado];
+      });
+
+      // 2. Enviar broadcast para os restantes
       channelRef.current?.send({
         type: 'broadcast',
         event: 'REGISTO_CRONO',
@@ -1000,6 +1016,12 @@ export default function Home() {
       eBomba: i === bombaIdx
     }));
 
+    // 1. Atualizar localmente
+    setCoposJogo(novosCopos);
+    setCpoJogadorAtualIdx(0);
+    setCpoPerdedor(null);
+
+    // 2. Enviar broadcast para os restantes
     channelRef.current?.send({
       type: 'broadcast',
       event: 'INICIAR_COPO',
@@ -1022,6 +1044,16 @@ export default function Home() {
 
     const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
 
+    // 1. Atualizar localmente
+    setCoposJogo(prev => prev.map(c => c.id === copoId ? { ...c, revelado: true, dono: nomeJogador } : c));
+    if (copo.eBomba) {
+      setCpoPerdedor({ id: selectedUser, nome: nomeJogador });
+      dispararCelebracao();
+    } else {
+      setCpoJogadorAtualIdx(prev => (prev + 1) % presentesMesa.length);
+    }
+
+    // 2. Broadcast para os outros
     channelRef.current?.send({
       type: 'broadcast',
       event: 'VIRAR_COPO',
