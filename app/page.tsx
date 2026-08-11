@@ -362,6 +362,16 @@ export default function Home() {
       navigator.serviceWorker.register('/sw.js').catch(console.error);
     }
 
+    // 🔄 DETETAR QUANDO A APP VOLTA DO SEGUNDO PLANO OU CLIQUE EM NOTIFICAÇÃO
+    const handleReabertura = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDados();
+      }
+    };
+
+    window.addEventListener('focus', fetchDados);
+    document.addEventListener('visibilitychange', handleReabertura);
+
     const canalRealtime = supabase
       .channel('tempo-real-finos')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'finos' }, () => { fetchDados(); })
@@ -466,6 +476,8 @@ export default function Home() {
       .subscribe();
 
     return () => {
+      window.removeEventListener('focus', fetchDados);
+      document.removeEventListener('visibilitychange', handleReabertura);
       supabase.removeChannel(canalRealtime);
       supabase.removeChannel(canalJogos);
       if (reacaoTimerRef.current) clearTimeout(reacaoTimerRef.current);
