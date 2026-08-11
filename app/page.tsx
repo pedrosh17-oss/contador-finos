@@ -703,6 +703,7 @@ export default function Home() {
   const finosExibidos = abaRanking === 'semanal' ? finosSemana : finosValidos;
   const totalFinosEq = finosExibidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
   const totalFinosGeralEq = finosValidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
+  const totalLitrosGrupo = (totalFinosGeralEq * 0.2).toFixed(1);
   const proximoMarco = MARCOS_GRUPO.find(m => m.meta > totalFinosGeralEq);
 
   const finosPorDataStr: { [key: string]: any[] } = {};
@@ -1498,14 +1499,18 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className={`p-4 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
-                <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Total Equivalente</p>
-                <p className={`text-3xl font-black leading-tight mt-1 ${isModoFesta ? 'text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'text-amber-500'}`}>{formatarFinos(totalFinosGeralEq)}</p>
+            <div className="grid grid-cols-3 gap-2">
+              <div className={`p-3 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
+                <p className={`text-[9px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Total Finos</p>
+                <p className={`text-xl font-black leading-tight mt-1 ${isModoFesta ? 'text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'text-amber-500'}`}>{formatarFinos(totalFinosGeralEq)}</p>
               </div>
-              <div className={`p-4 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
-                <p className={`text-[10px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Líder Absoluto 🍾</p>
-                <p className="text-xl font-black truncate mt-1 text-inherit">{reiDoFinoAbsoluto && reiDoFinoAbsoluto.countGeral > 0 ? reiDoFinoAbsoluto.nome : '-'}</p>
+              <div className={`p-3 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
+                <p className={`text-[9px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Litros Grupo 🩸</p>
+                <p className={`text-xl font-black leading-tight mt-1 ${isModoFesta ? 'text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.8)]' : 'text-red-400'}`}>{totalLitrosGrupo}L</p>
+              </div>
+              <div className={`p-3 rounded-2xl shadow text-center flex flex-col justify-center border transition-colors ${cardClasses}`}>
+                <p className={`text-[9px] uppercase font-extrabold tracking-wider ${isModoFesta ? 'text-white/60' : 'text-slate-400'}`}>Líder 🍾</p>
+                <p className="text-sm font-black truncate mt-1 text-inherit">{reiDoFinoAbsoluto && reiDoFinoAbsoluto.countGeral > 0 ? reiDoFinoAbsoluto.nome : '-'}</p>
               </div>
             </div>
 
