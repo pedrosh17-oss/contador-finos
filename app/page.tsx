@@ -687,6 +687,11 @@ export default function Home() {
 
       const bebidaInfo = TIPOS_BEBIDA[tipoBebidaSelecionado];
 
+      // 🚨 CÁLCULO DE MILESTONES ANTES E DEPOIS DO REGISTO
+      const totalAntes = totalFinosGeralEq;
+      const qtdAdicionada = bebidaInfo.equivalencia * (modoRegisto === 'rodada' ? bebedoresRodada.length : 1);
+      const totalDepois = totalAntes + qtdAdicionada;
+
       if (modoRegisto === 'individual') {
         await supabase.from('finos').insert([{ 
           perfil_id: selectedUser, foto_url: photoUrl, tipo_bebida: tipoBebidaSelecionado, quantidade_equivalente: bebidaInfo.equivalencia, lat: coords.lat, lng: coords.lng
@@ -701,8 +706,16 @@ export default function Home() {
       const nomeUser = perfis.find(p => p.id === selectedUser)?.nome || 'Alguém';
       const agoraHora = new Date().getHours();
 
-      if (modoRegisto === 'rodada') {
-         enviarNotificacao('💳 O CHEFE PAGOU UMA RODADA!', `${nomeUser} pagou uma rodada para ${bebedoresRodada.length} amigos! Paga o que deves!`);
+      // 🏆 VERIFICAR SE CRUZOU ALGUMA MILESTONE DO GRUPO
+      const marcoUltrapassado = MARCOS_GRUPO.find(m => totalAntes < m.meta && totalDepois >= m.meta);
+
+      if (marcoUltrapassado) {
+        enviarNotificacao(
+          `🎉 NOVO MARCO: ${marcoUltrapassado.meta} FINOS!`,
+          `${nomeUser} acabou de desbloquear o marco dos ${marcoUltrapassado.meta} finos! "${marcoUltrapassado.texto}"`
+        );
+      } else if (modoRegisto === 'rodada') {
+        enviarNotificacao('💳 O CHEFE PAGOU UMA RODADA!', `${nomeUser} pagou uma rodada para ${bebedoresRodada.length} amigos! Paga o que deves!`);
       } else {
         if (agoraHora >= 3 && agoraHora < 6) {
           enviarNotificacao('🎂 É PARABÉNS:', `${nomeUser} recusa-se a ir dormir e acabou de registar mais uma bebida. Já passa das 3 da manhã…`);
@@ -729,7 +742,6 @@ export default function Home() {
       setLoading(false);
     }
   }
-
   async function criarPerfil() {
     if (!novoNome) { mostrarToast('Escreve o teu nome primeiro!', 'erro'); return; }
     await supabase.from('perfis').insert([{ nome: novoNome }]);
