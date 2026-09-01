@@ -78,13 +78,6 @@ const MARCOS_GRUPO = [
   { meta: 1000, texto: "1.000 FINOS! 200 LITROS DE CERVEJA! O volume total enchia rigorosamente a bagageira de um Volkswagen Golf de 2020 até ao teto! Somos grandes!" }
 ];
 
-const TEMAS_RAPIDOS_TRIVIA = [
-  '⚽ Carreira de Jogadores',
-  '🍺 Cerveja & Tascos',
-  '⚽ Futebol Nacional',
-  '🎬 Cinema & Séries',
-  '🇵🇹 Cultura Tuga'
-];
 
 const SONS_CELEBRACAO = [
   'https://assets.mixkit.co/active_storage/sfx/2070/2070-preview.mp3', 
@@ -298,7 +291,7 @@ export default function Home() {
   const [fighter2, setFighter2] = useState<string>('');
 
   // 🎲 ABA RODADA & MINI-JOGOS
-  const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo' | 'reacao' | 'trivia'>('roleta');
+  const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo' | 'reacao'>('roleta');
   const [presentesMesa, setPresentesMesa] = useState<string[]>([]);
   const [seletorTelemovelAberto, setSeletorTelemovelAberto] = useState(false);
 
@@ -331,15 +324,6 @@ export default function Home() {
   const [reacaoResultados, setReacaoResultados] = useState<{ id: string; nome: string; tempoMs: number | null; falsaPartida: boolean }[]>([]);
   const [reacaoPerdedor, setReacaoPerdedor] = useState<any | null>(null);
 
-  // 🧠 JOGO DUELO DE TRIVIA COM IA
-  const [triviaTemaInput, setTriviaTemaInput] = useState('');
-  const [triviaCarregandoIA, setTriviaCarregandoIA] = useState(false);
-  const [triviaPerguntas, setTriviaPerguntas] = useState<any[]>([]);
-  const [triviaPerguntaIdx, setTriviaPerguntaIdx] = useState(0);
-  const [triviaTempoRestante, setTriviaTempoRestante] = useState(20);
-  const [triviaPlacarLive, setTriviaPlacarLive] = useState<Record<string, { id: string; nome: string; pontos: number; respostas: any[]; concluido: boolean }>>({});
-  const [triviaPerdedor, setTriviaPerdedor] = useState<any | null>(null);
-  const [jogadorExpandido, setJogadorExpandido] = useState<string | null>(null);
 
   // ABA PERFIL
   const [perfilSelecionadoId, setPerfilSelecionadoId] = useState<string>('');
@@ -350,7 +334,6 @@ export default function Home() {
   const timerIntervalRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
   const reacaoTimerRef = useRef<any>(null);
-  const triviaTimerRef = useRef<any>(null);
 
   useEffect(() => {
     fetchDados();
@@ -434,45 +417,6 @@ export default function Home() {
           return [...filtrado, payload];
         });
       })
-      .on('broadcast', { event: 'INICIAR_TRIVIA' }, ({ payload }) => {
-        setPresentesMesa(payload.jogadores);
-        setTriviaPerguntas(payload.perguntas);
-        setTriviaPerguntaIdx(0);
-        setTriviaTempoRestante(20);
-        setTriviaPerdedor(null);
-        setJogadorExpandido(null);
-
-        const placarInicial: Record<string, any> = {};
-        payload.jogadores.forEach((jId: string) => {
-          const nome = perfis.find(p => p.id === jId)?.nome || 'Jogador';
-          placarInicial[jId] = { id: jId, nome, pontos: 0, respostas: [], concluido: false };
-        });
-        setTriviaPlacarLive(placarInicial);
-        setModoDecisaoRodada('trivia');
-      })
-      .on('broadcast', { event: 'RESPOSTA_TRIVIA' }, ({ payload }) => {
-        const { jogadorId, nome, perguntaIdx, pergunta, opcaoEscolhida, opcaoCorreta, acertou, pontos, totalPerguntas } = payload;
-        
-        setTriviaPlacarLive(prev => {
-          const atual = prev[jogadorId] || { id: jogadorId, nome, pontos: 0, respostas: [], concluido: false };
-          const novasRespostas = [...atual.respostas];
-          novasRespostas[perguntaIdx] = { pergunta, opcaoEscolhida, opcaoCorreta, acertou };
-          const novosPontos = atual.pontos + (pontos || 0);
-          const numRespostas = novasRespostas.filter(Boolean).length;
-          const estaConcluido = numRespostas >= (totalPerguntas || 10);
-
-          return {
-            ...prev,
-            [jogadorId]: {
-              ...atual,
-              nome,
-              pontos: novosPontos,
-              respostas: novasRespostas,
-              concluido: estaConcluido
-            }
-          };
-        });
-      })
       .subscribe();
 
     return () => {
@@ -481,7 +425,6 @@ export default function Home() {
       supabase.removeChannel(canalRealtime);
       supabase.removeChannel(canalJogos);
       if (reacaoTimerRef.current) clearTimeout(reacaoTimerRef.current);
-      if (triviaTimerRef.current) clearInterval(triviaTimerRef.current);
     };
   }, []);
 
@@ -515,44 +458,7 @@ export default function Home() {
     }
   }, [reacaoResultados, presentesMesa]);
 
-  // 🧠 TEMPORIZADOR LOCAL DAS PERGUNTAS DO TRIVIA (20 SEC)
-  useEffect(() => {
-    if (modoDecisaoRodada !== 'trivia' || triviaPerguntas.length === 0 || triviaPerguntaIdx >= triviaPerguntas.length || triviaPerdedor) return;
-
-    if (triviaTimerRef.current) clearInterval(triviaTimerRef.current);
-
-    triviaTimerRef.current = setInterval(() => {
-      setTriviaTempoRestante(prev => {
-        if (prev <= 1) {
-          submeterRespostaLocal(-1);
-          return 20;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(triviaTimerRef.current);
-  }, [modoDecisaoRodada, triviaPerguntaIdx, triviaPerguntas, triviaPerdedor]);
-
-  // 🏁 VERIFICAR FIM GLOBAL DO DUELO DE TRIVIA (QUANDO TODOS TERMINAM)
-  useEffect(() => {
-    if (modoDecisaoRodada === 'trivia' && triviaPerguntas.length > 0 && !triviaPerdedor) {
-      const listaJogadores = Object.values(triviaPlacarLive);
-      if (listaJogadores.length >= presentesMesa.length && presentesMesa.length >= 2) {
-        const todosConcluidos = presentesMesa.every(pId => {
-          const j = triviaPlacarLive[pId];
-          return j && (j.concluido || (j.respostas && j.respostas.filter(Boolean).length >= triviaPerguntas.length));
-        });
-
-        if (todosConcluidos) {
-          const ordenados = [...listaJogadores].sort((a, b) => a.pontos - b.pontos);
-          const pior = ordenados[0];
-          setTriviaPerdedor(pior);
-          dispararCelebracao();
-        }
-      }
-    }
-  }, [triviaPlacarLive, modoDecisaoRodada, triviaPerguntas, presentesMesa, triviaPerdedor]);
+ 
 
   // 🗺️ MAPA DE CLUSTERS LEAFLET
   useEffect(() => {
@@ -1262,122 +1168,6 @@ export default function Home() {
     }
   }
 
-  // ==========================================
-  // 🧠 LÓGICA DO JOGO 4: DUELO DE TRIVIA COM IA
-  // ==========================================
-  async function iniciarJogoTriviaIA() {
-    if (presentesMesa.length < 2) { mostrarToast('Seleciona pelo menos 2 pessoas na mesa!', 'erro'); return; }
-
-    try {
-      setTriviaCarregandoIA(true);
-
-      const res = await fetch('/api/trivia', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tema: triviaTemaInput })
-      });
-
-      const data = await res.json();
-      if (!res.ok || data.error || !data.perguntas) {
-        throw new Error(data.error || 'Erro ao gerar perguntas');
-      }
-
-      setTriviaPerguntas(data.perguntas);
-      setTriviaPerguntaIdx(0);
-      setTriviaTempoRestante(20);
-      setTriviaPerdedor(null);
-      setJogadorExpandido(null);
-
-      const placarInicial: Record<string, any> = {};
-      presentesMesa.forEach(pId => {
-        const nome = perfis.find(p => p.id === pId)?.nome || 'Jogador';
-        placarInicial[pId] = { id: pId, nome, pontos: 0, respostas: [], concluido: false };
-      });
-      setTriviaPlacarLive(placarInicial);
-
-      channelRef.current?.send({
-        type: 'broadcast',
-        event: 'INICIAR_TRIVIA',
-        payload: { perguntas: data.perguntas, jogadores: presentesMesa }
-      });
-    } catch (e: any) {
-      mostrarToast(e.message || 'Falha na IA do Gemini.', 'erro');
-    } finally {
-      setTriviaCarregandoIA(false);
-    }
-  }
-
-  function submeterRespostaLocal(opcaoIdx: number) {
-    if (!selectedUser) {
-      mostrarToast('Seleciona quem és tu no telemóvel primeiro!', 'erro');
-      return;
-    }
-
-    if (triviaPerguntaIdx >= triviaPerguntas.length) return;
-
-    const perguntaAtual = triviaPerguntas[triviaPerguntaIdx];
-    const acertou = opcaoIdx === perguntaAtual.correta;
-    const pontos = acertou ? 1 : 0;
-    const nomeJogador = perfis.find(p => p.id === selectedUser)?.nome || 'Jogador';
-
-    const payloadResposta = {
-      jogadorId: selectedUser,
-      nome: nomeJogador,
-      perguntaIdx: triviaPerguntaIdx,
-      pergunta: perguntaAtual.pergunta,
-      opcaoEscolhida: opcaoIdx >= 0 ? perguntaAtual.opcoes[opcaoIdx] : 'Tempo Esgotado ⏱️',
-      opcaoCorreta: perguntaAtual.opcoes[perguntaAtual.correta],
-      acertou,
-      pontos,
-      totalPerguntas: triviaPerguntas.length
-    };
-
-    // Atualiza imediatamente a nível local
-    setTriviaPlacarLive(prev => {
-      const atual = prev[selectedUser] || { id: selectedUser, nome: nomeJogador, pontos: 0, respostas: [], concluido: false };
-      const novasRespostas = [...atual.respostas];
-      novasRespostas[triviaPerguntaIdx] = {
-        pergunta: perguntaAtual.pergunta,
-        opcaoEscolhida: payloadResposta.opcaoEscolhida,
-        opcaoCorreta: payloadResposta.opcaoCorreta,
-        acertou
-      };
-      const novosPontos = atual.pontos + pontos;
-      const numRespostas = novasRespostas.filter(Boolean).length;
-      const estaConcluido = numRespostas >= triviaPerguntas.length;
-
-      return {
-        ...prev,
-        [selectedUser]: {
-          ...atual,
-          nome: nomeJogador,
-          pontos: novosPontos,
-          respostas: novasRespostas,
-          concluido: estaConcluido
-        }
-      };
-    });
-
-    // Transmite a resposta aos restantes telemóveis
-    channelRef.current?.send({
-      type: 'broadcast',
-      event: 'RESPOSTA_TRIVIA',
-      payload: payloadResposta
-    });
-
-    // Avança apenas no ecrã do jogador atual
-    setTriviaPerguntaIdx(prev => prev + 1);
-    setTriviaTempoRestante(20);
-  }
-
-  function fecharJanelaTrivia() {
-    setTriviaPerguntas([]);
-    setTriviaPerguntaIdx(0);
-    setTriviaPerdedor(null);
-    setTriviaPlacarLive({});
-    setModoDecisaoRodada('trivia');
-  }
-
   const toggleDia = (dia: string) => setDiasAbertos((prev) => ({ ...prev, [dia]: !prev[dia] }));
   const finosPorDiaParaLista = finos.reduce((acc: { [key: string]: any[] }, fino) => {
     const dataStr = new Date(fino.data_hora).toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1867,7 +1657,6 @@ export default function Home() {
                 <button onClick={() => setModoDecisaoRodada('cronometro')} className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'cronometro' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}>⏱️ Cronómetro</button>
                 <button onClick={() => setModoDecisaoRodada('copo')} className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'copo' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}>💣 Copo Morte</button>
                 <button onClick={() => setModoDecisaoRodada('reacao')} className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'reacao' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}>⚡ Reação</button>
-                <button onClick={() => setModoDecisaoRodada('trivia')} className={`flex-1 py-2 px-1 rounded-lg font-black text-[9px] uppercase transition truncate ${modoDecisaoRodada === 'trivia' ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'}`}>🧠 Trivia IA</button>
               </div>
 
               {/* SELEÇÃO DA MESA (COMUM A TODOS OS JOGOS) */}
@@ -2401,180 +2190,6 @@ export default function Home() {
         {fotoExpandida && (
           <div onClick={() => setFotoExpandida(null)} className="fixed inset-0 bg-black/90 flex items-center justify-center p-2 z-[70] cursor-pointer">
             <img src={fotoExpandida} alt="Foto em destaque" className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl object-contain" />
-          </div>
-        )}
-
-        {/* ========================================== */}
-        {/* 🧠 MODAL DO JOGO TRIVIA (ECRÃ INTEIRO COM FOTOS) */}
-        {/* ========================================== */}
-        {modoDecisaoRodada === 'trivia' && triviaPerguntas.length > 0 && !triviaCarregandoIA && (
-          <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col animate-fadeIn overflow-hidden">
-            
-            {/* CABEÇALHO */}
-            <div className="flex justify-between items-center p-4 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
-              <span className="text-amber-500 font-black text-lg">🧠 Duelo IA Visual</span>
-              <button onClick={fecharJanelaTrivia} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full w-8 h-8 flex items-center justify-center font-black transition">✕</button>
-            </div>
-
-            {/* CORPO */}
-            <div className="flex-1 overflow-y-auto p-4 relative flex flex-col">
-              
-              {/* ESTADO 1: JOGO EM CURSO */}
-              {triviaPerguntaIdx < triviaPerguntas.length && !triviaPerdedor ? (
-                <div className="flex-1 flex flex-col justify-center max-w-lg mx-auto w-full">
-                  <div className="flex justify-between items-center text-xs font-black text-amber-400 mb-3">
-                    <span className="bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-lg">Pergunta {triviaPerguntaIdx + 1} de {triviaPerguntas.length}</span>
-                    <span className={`px-4 py-1.5 rounded-full text-white border-2 font-black text-sm shadow-lg ${triviaTempoRestante <= 5 ? 'bg-red-500 border-red-400 text-white animate-pulse' : 'bg-slate-800 border-amber-500/50'}`}>
-                      ⏱️ {triviaTempoRestante}s
-                    </span>
-                  </div>
-
-                  {/* SE TIVER CARREIRA: MOSTRA CARTÃO DE CLUBES NO LUGAR DA FOTO */}
-{triviaPerguntas[triviaPerguntaIdx].carreira && triviaPerguntas[triviaPerguntaIdx].carreira.length > 0 ? (
-  <div className="w-full p-4 rounded-2xl border-2 border-amber-500/40 bg-slate-900/90 shadow-2xl mb-4 flex flex-col items-center justify-center space-y-1.5 min-h-[180px]">
-    <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-1 flex items-center gap-1">
-      ⚽ Histórico de Clubes
-    </span>
-    <div className="w-full space-y-1.5 max-h-48 overflow-y-auto pr-1">
-      {triviaPerguntas[triviaPerguntaIdx].carreira.map((clube: string, cIdx: number) => {
-        const partes = clube.split(':');
-        const epoc = partes[0] ? partes[0].trim() : '';
-        const nomeClube = partes[1] ? partes[1].trim() : clube;
-
-        return (
-          <div key={cIdx} className="bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-200 flex items-center justify-between shadow-sm">
-            <span className="text-amber-500 font-extrabold shrink-0 mr-2">{epoc}</span>
-            <span className="text-white truncate font-black text-right">{nomeClube}</span>
-          </div>
-        );
-      })}
-    </div>
-  </div>
-) : (
-  /* CASO CONTRÁRIO: MOSTRA A FOTO NORMAL */
-  triviaPerguntas[triviaPerguntaIdx].fotoUrl && (
-    <div className="w-full aspect-video rounded-2xl overflow-hidden mb-4 border-2 border-amber-500/40 shadow-2xl relative bg-slate-900 flex items-center justify-center">
-      <img 
-        src={triviaPerguntas[triviaPerguntaIdx].fotoUrl} 
-        alt="Pergunta Visual" 
-        className="w-full h-full object-cover"
-        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-      />
-    </div>
-  )
-)}
-
-                  <p className="text-base sm:text-lg font-extrabold text-white text-center leading-snug mb-5">
-                    {triviaPerguntas[triviaPerguntaIdx].pergunta}
-                  </p>
-
-                  <div className="grid grid-cols-1 gap-2.5 w-full">
-                    {triviaPerguntas[triviaPerguntaIdx].opcoes.map((opcao: string, oIdx: number) => (
-                      <button
-                        key={oIdx}
-                        onClick={() => submeterRespostaLocal(oIdx)}
-                        className="w-full p-4 rounded-2xl border-2 border-slate-700 bg-slate-900 text-slate-200 text-sm font-bold text-left hover:border-amber-500 hover:bg-slate-800 transition active:scale-[0.98] shadow-md flex items-center"
-                      >
-                        <span className="w-7 h-7 rounded-full bg-slate-800 text-amber-500 flex items-center justify-center mr-3 font-black shrink-0 text-xs">
-                          {String.fromCharCode(65 + oIdx)}
-                        </span>
-                        {opcao}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                /* ESTADO 2 E 3: RESULTADOS FINAIS */
-                <div className="flex-1 flex flex-col justify-center max-w-lg mx-auto w-full">
-                  {!triviaPerdedor ? (
-                    <div className="p-6 rounded-3xl bg-slate-900/80 border border-amber-500/30 text-center space-y-6 shadow-2xl">
-                      <div className="text-6xl animate-bounce">⏳</div>
-                      <h3 className="text-2xl font-black text-amber-400">Já tá!</h3>
-                      <p className="text-sm text-slate-300 font-medium">A aguardar que os restantes jogadores concluam as suas perguntas...</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      <div className="p-6 rounded-3xl bg-red-600 border-4 border-yellow-400 text-white text-center shadow-[0_0_40px_rgba(255,0,0,0.4)] animate-bounce">
-                        <p className="text-xs font-black uppercase tracking-widest opacity-90">🧠 MENOR PONTUAÇÃO DE TRIVIA!</p>
-                        <h3 className="text-3xl font-black mt-2">🍺 {triviaPerdedor.nome} PAGA A RODADA!</h3>
-                        <p className="text-sm font-bold mt-2 opacity-90">Ficou em último lugar com apenas {triviaPerdedor.pontos} / 10 pontos!</p>
-                      </div>
-
-                      <h3 className="text-xl font-black text-amber-400 text-center mt-8">🏆 Classificação Final</h3>
-                      <p className="text-[10px] text-slate-400 text-center -mt-2">Clica num jogador para ver o histórico de respostas</p>
-
-                      <div className="space-y-3 pb-8">
-                        {Object.values(triviaPlacarLive)
-                          .sort((a: any, b: any) => b.pontos - a.pontos)
-                          .map((j: any, index: number, arr: any[]) => {
-                            const eOPerdedor = j.id === triviaPerdedor.id || index === arr.length - 1;
-                            const isExpanded = jogadorExpandido === j.id;
-
-                            return (
-                              <div key={j.id} className="border border-slate-700 rounded-2xl overflow-hidden bg-slate-900 shadow-md">
-                                <button onClick={() => setJogadorExpandido(isExpanded ? null : j.id)} className="w-full p-4 flex justify-between items-center text-left hover:bg-slate-800 transition">
-                                  <div className="flex items-center gap-3">
-                                    <span className="font-black text-slate-500 text-sm">#{index + 1}</span>
-                                    <span className="font-extrabold text-white text-base">{j.nome}</span>
-                                    {eOPerdedor && <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-1 rounded-md font-black border border-red-500/30">Paga! 🍺</span>}
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-amber-400 font-black text-base">{j.pontos} <span className="text-[10px] uppercase text-amber-500/70">pts</span></span>
-                                    <span className="text-sm text-slate-500">{isExpanded ? '🔼' : '🔽'}</span>
-                                  </div>
-                                </button>
-
-                                {isExpanded && (
-                                  <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-3">
-                                    {j.respostas && j.respostas.length > 0 ? (
-                                      j.respostas.map((r: any, idx: number) => (
-                                        <div key={idx} className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                                          <p className="font-semibold text-slate-200 mb-1.5 text-xs leading-relaxed">{idx + 1}. {r?.pergunta}</p>
-                                          <p className={r?.acertou ? 'text-emerald-400 font-bold text-[11px]' : 'text-red-400 font-bold text-[11px]'}>
-                                            {r?.acertou ? '✓ Certo:' : '✗ Errou:'} <span className="font-medium text-white ml-1">{r?.opcaoEscolhida}</span>
-                                          </p>
-                                          {!r?.acertou && <p className="text-slate-400 text-[11px] mt-1 border-t border-slate-800/50 pt-1">Era a opção: <span className="text-emerald-400 font-bold">{r?.opcaoCorreta}</span></p>}
-                                        </div>
-                                      ))
-                                    ) : <p className="text-slate-500 italic text-[11px]">Sem respostas registadas.</p>}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* RODAPÉ TABELA LIVE */}
-            {!triviaPerdedor && (
-              <div className="p-4 bg-slate-950 border-t border-slate-800">
-                <p className="text-[10px] font-extrabold text-slate-500 mb-3 uppercase tracking-widest text-center">📊 Tabela Live</p>
-                <div className="grid grid-cols-2 gap-2 text-xs max-w-lg mx-auto w-full">
-                  {presentesMesa.map(pId => {
-                    const j = triviaPlacarLive[pId];
-                    const nome = j?.nome || perfis.find(p => p.id === pId)?.nome || 'Jogador';
-                    const respCount = j?.respostas ? j.respostas.filter(Boolean).length : 0;
-                    const pontos = j?.pontos || 0;
-                    const estaConcluido = j?.concluido || respCount >= 10;
-
-                    return (
-                      <div key={pId} className="bg-slate-900 border border-slate-800 p-2.5 rounded-xl flex justify-between items-center">
-                        <span className="truncate font-bold text-slate-300 mr-2">{nome}</span>
-                        {estaConcluido ? (
-                           <span className="bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded-md text-[10px] font-black shrink-0 border border-emerald-500/20">{pontos} pts</span>
-                        ) : (
-                           <span className="bg-amber-500/10 text-amber-500 px-2 py-1 rounded-md text-[10px] font-black shrink-0 border border-amber-500/20">{respCount}/10</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </main>
