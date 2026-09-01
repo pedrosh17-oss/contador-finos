@@ -580,9 +580,9 @@ export default function Home() {
               const res = await fetch(`/api/geocode?lat=${dados.lat}&lng=${dados.lng}`);
               if (res.ok) {
                 const data = await res.json();
-                if (data?.city) {
+                if (data?.city && typeof data.city === 'string') {
                   nomeConcelho = data.city;
-                  localStorage.setItem(cacheKey, nomeConcelho);
+                  localStorage.setItem(cacheKey, data.city);
                 }
               }
             } catch {
