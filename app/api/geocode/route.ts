@@ -6,23 +6,37 @@ export async function GET(request: Request) {
   const lng = searchParams.get('lng');
 
   if (!lat || !lng) {
-    return NextResponse.json({ city: 'Zona GPS' });
+    return NextResponse.json({ country: 'Outro País', district: 'Outro Distrito', city: 'Zona GPS' });
   }
 
   try {
     const res = await fetch(
       `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=pt`,
-      { headers: { 'User-Agent': 'ContadorFinos/1.0' } }
+      {
+        headers: { 'User-Agent': 'ContadorFinos/1.0' },
+        cache: 'force-cache'
+      }
     );
 
     if (res.ok) {
       const data = await res.json();
-      const city = data.city || data.locality || data.principalSubdivision || data.countryName;
-      if (city) return NextResponse.json({ city });
+      const country = data.countryName || 'Outro País';
+      
+      let district = data.principalSubdivision || 'Outro Distrito';
+      district = district.replace(/^(Distrito de|Distrito do|Distrito da|Região Autónoma da|Região Autónoma dos)\s+/i, '');
+
+      let city = data.city || data.locality || data.municipality || 'Outro Concelho';
+      city = city.replace(/^(Concelho de|Concelho do|Município de|Município do)\s+/i, '');
+
+      return NextResponse.json({ country, district, city });
     }
   } catch {
-    // Retorna fallback silencioso em caso de falha de rede externa
+    // Fallback silencioso
   }
 
-  return NextResponse.json({ city: `Zona (${Number(lat).toFixed(2)}, ${Number(lng).toFixed(2)})` });
+  return NextResponse.json({ 
+    country: 'Outro País', 
+    district: 'Outro Distrito', 
+    city: `Zona (${Number(lat).toFixed(2)}, ${Number(lng).toFixed(2)})` 
+  });
 }

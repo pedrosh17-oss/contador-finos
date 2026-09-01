@@ -297,8 +297,17 @@ export default function Home() {
   const [fotoExpandida, setFotoExpandida] = useState<string | null>(null);
   const [diasAbertos, setDiasAbertos] = useState<{ [key: string]: boolean }>({});
 
-  const [fighter1, setFighter1] = useState<string>('');
-  const [fighter2, setFighter2] = useState<string>('');
+  // 🌍 ESTADOS DA HIERARQUIA GEOGRÁFICA (PAÍS -> DISTRITO -> CONCELHO)
+  type ConcelhoItem = { concelho: string; total: number; pessoas: string[] };
+  type DistritoItem = { distrito: string; total: number; concelhos: ConcelhoItem[] };
+  type PaisItem = { pais: string; total: number; distritos: DistritoItem[] };
+
+  const [geoStats, setGeoStats] = useState<PaisItem[]>([]);
+  const [paisesAbertos, setPaisesAbertos] = useState<Record<string, boolean>>({});
+  const [distritosAbertos, setDistritosAbertos] = useState<Record<string, boolean>>({});
+
+  const togglePais = (pais: string) => setPaisesAbertos(prev => ({ ...prev, [pais]: !prev[pais] }));
+  const toggleDistrito = (distrito: string) => setDistritosAbertos(prev => ({ ...prev, [distrito]: !prev[distrito] }));
 
   // 🎲 ABA RODADA & MINI-JOGOS
   const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo' | 'reacao'>('roleta');
@@ -546,16 +555,15 @@ export default function Home() {
       }, 150);
     }
 
-    // 🏙️ CÁLCULO DOS CONCELHOS (VERSÃO ULTRA-ESTÁVEL SEM ERROS TYPESCRIPT)
+    // 🏙️ CÁLCULO HIERÁRQUICO: PAÍS -> DISTRITO -> CONCELHO
     const processarCidades = async () => {
       try {
         const pontos = finos.filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio');
         if (!pontos || pontos.length === 0) {
-          setCidadesStats([]);
+          setGeoStats([]);
           return;
         }
 
-        // 1. Agrupar por coordenadas aproximadas (~2km)
         const pontosPorCoordenada: Record<string, { lat: number; lng: number; total: number; pessoas: Set<string> }> = {};
 
         pontos.forEach(p => {
@@ -568,50 +576,68 @@ export default function Home() {
           if (p.perfis?.nome) pontosPorCoordenada[key].pessoas.add(p.perfis.nome);
         });
 
-        // 2. Chamar a API local com tratamento direto de erros
-        const mapaAgrupadoConcelhos: Record<string, { total: number; pessoas: Set<string> }> = {};
+        const mapaGeo: Record<string, Record<string, Record<string, { total: number; pessoas: Set<string> }>>> = {};
 
         for (const [key, dados] of Object.entries(pontosPorCoordenada)) {
-          const cacheKey = `geo_concelho_v6_${key}`;
-          let nomeConcelho = localStorage.getItem(cacheKey);
+          const cacheKey = `geo_hierarquia_v3_${key}`;
+          let infoStr = localStorage.getItem(cacheKey);
+          let info: { country: string; district: string; city: string } | null = null;
 
-          if (!nomeConcelho) {
+          if (infoStr) {
+            try { info = JSON.parse(infoStr); } catch {}
+          }
+
+          if (!info) {
             try {
               const res = await fetch(`/api/geocode?lat=${dados.lat}&lng=${dados.lng}`);
               if (res.ok) {
                 const data = await res.json();
-                if (data?.city && typeof data.city === 'string') {
-                  nomeConcelho = data.city;
-                  localStorage.setItem(cacheKey, data.city);
-                }
+                info = {
+                  country: data.country || 'Outro País',
+                  district: data.district || 'Outro Distrito',
+                  city: data.city || `Zona (${key})`
+                };
+                localStorage.setItem(cacheKey, JSON.stringify(info));
               }
             } catch {
-              // Se a rota falhar no browser, define o nome local diretamente
+              info = { country: 'Outro País', district: 'Outro Distrito', city: `Zona (${key})` };
             }
           }
 
-          const concelhoFinal = nomeConcelho || `Zona (${key})`;
+          const pais = info?.country || 'Outro País';
+          const distrito = info?.district || 'Outro Distrito';
+          const concelho = info?.city || `Zona (${key})`;
 
-          if (!mapaAgrupadoConcelhos[concelhoFinal]) {
-            mapaAgrupadoConcelhos[concelhoFinal] = { total: 0, pessoas: new Set() };
-          }
+          if (!mapaGeo[pais]) mapaGeo[pais] = {};
+          if (!mapaGeo[pais][distrito]) mapaGeo[pais][distrito] = {};
+          if (!mapaGeo[pais][distrito][concelho]) mapaGeo[pais][distrito][concelho] = { total: 0, pessoas: new Set() };
 
-          mapaAgrupadoConcelhos[concelhoFinal].total += dados.total;
-          dados.pessoas.forEach(p => mapaAgrupadoConcelhos[concelhoFinal].pessoas.add(p));
+          mapaGeo[pais][distrito][concelho].total += dados.total;
+          dados.pessoas.forEach(p => mapaGeo[pais][distrito][concelho].pessoas.add(p));
         }
 
-        const resultadoFinal = Object.entries(mapaAgrupadoConcelhos).map(([cidade, dados]) => ({
-          cidade,
-          total: dados.total,
-          pessoas: Array.from(dados.pessoas)
-        })).sort((a, b) => b.total - a.total);
+        const hierarquiaFinal: PaisItem[] = Object.entries(mapaGeo).map(([pais, distritosObj]) => {
+          let totalPais = 0;
+          const distritosArr: DistritoItem[] = Object.entries(distritosObj).map(([distrito, concelhosObj]) => {
+            let totalDistrito = 0;
+            const concelhosArr: ConcelhoItem[] = Object.entries(concelhosObj).map(([concelho, d]) => {
+              totalDistrito += d.total;
+              return { concelho, total: d.total, pessoas: Array.from(d.pessoas) };
+            }).sort((a, b) => b.total - a.total);
 
-        setCidadesStats(resultadoFinal);
+            totalPais += totalDistrito;
+            return { distrito, total: totalDistrito, concelhos: concelhosArr };
+          }).sort((a, b) => b.total - a.total);
+
+          return { pais, total: totalPais, distritos: distritosArr };
+        }).sort((a, b) => b.total - a.total);
+
+        setGeoStats(hierarquiaFinal);
       } catch (err) {
         console.error('Erro silencioso em processarCidades:', err);
       }
     };
-    
+
     processarCidades();
 
     return () => { if (intervalId) clearInterval(intervalId); };
@@ -1009,15 +1035,7 @@ const statsStreaks = perfis.map(p => {
     if (countDiff > 0) ritmoUsers.push({ id: p.id, nome: p.nome, paceMin: Math.round((totalDiff / countDiff) / 60000) });
   });
 
-  function getFighterStats(id: string) {
-    const pCount = contagemPorPessoa.find(p => p.id === id)?.count || 0;
-    const pStreak = statsStreaks.find(s => s.id === id)?.maxStreak || 0;
-    const pRitmo = ritmoUsers.find(r => r.id === id)?.paceMin || Infinity;
-    return { count: pCount, streak: pStreak, ritmo: pRitmo };
-  }
 
-  const f1Stats = fighter1 ? getFighterStats(fighter1) : null;
-  const f2Stats = fighter2 ? getFighterStats(fighter2) : null;
 
   // LÓGICA DO SORTEADOR DA RODADA
   const toggleMesa = (id: string) => { setPresentesMesa(prev => prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]); };
@@ -1507,6 +1525,8 @@ const statsStreaks = perfis.map(p => {
         {/* RANKING */}
         {abaAtiva === 'ranking' && (
           <div className="space-y-6">
+            
+            {/* 1. TABELA GERAL */}
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <div className="flex justify-between items-center mb-3 border-b pb-2 border-slate-800/50">
                 <h2 className="font-bold text-lg flex items-center gap-2">📊 Tabela Geral</h2>
@@ -1572,24 +1592,7 @@ const statsStreaks = perfis.map(p => {
               </div>
             </div>
 
-            <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
-              <h2 className="font-bold text-lg mb-3 border-b pb-2 border-slate-800/50 flex items-center gap-2">⚔️ Frente-a-Frente</h2>
-              <div className="flex gap-2 items-center mb-4">
-                <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter1} onChange={(e) => setFighter1(e.target.value)}><option value="">Desafiante 1</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
-                <span className="font-black text-slate-500 text-sm">VS</span>
-                <select className={`flex-1 p-2 border rounded-xl text-xs font-bold outline-none ${isModoFesta ? 'bg-black/50 border-white/20 text-white' : darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`} value={fighter2} onChange={(e) => setFighter2(e.target.value)}><option value="">Desafiante 2</option>{perfis.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
-              </div>
-              {fighter1 && fighter2 && fighter1 !== fighter2 && f1Stats && f2Stats && (
-                <div className={`border rounded-xl p-3 space-y-3 ${isModoFesta ? 'bg-black/40 border-white/10' : darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex justify-between items-center border-b border-slate-800/50 pb-2">
-                    <span className={`w-1/3 text-left font-black text-lg ${f1Stats.count > f2Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f1Stats.count)}</span>
-                    <span className="w-1/3 text-center text-[9px] uppercase font-bold text-slate-500">Total</span>
-                    <span className={`w-1/3 text-right font-black text-lg ${f2Stats.count > f1Stats.count ? (isModoFesta ? 'text-white' : 'text-amber-500') : 'text-slate-500'}`}>{formatarFinos(f2Stats.count)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-            
+            {/* 2. CURIOSIDADES */}
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-bold text-lg mb-4 border-b pb-2 border-slate-800/50">📈 Curiosidades</h2>
               <div className="grid grid-cols-2 gap-4">
@@ -1625,7 +1628,7 @@ const statsStreaks = perfis.map(p => {
             </div>
           </div>
         )}
-
+        
         {/* 🪪 FICHA MÉDICA */}
         {abaAtiva === 'perfil' && (
           <div className="space-y-6">
@@ -2144,9 +2147,8 @@ const statsStreaks = perfis.map(p => {
           </div>
         )}
 
-        {/* MAPA MUNDIAL DE CLUSTERS */}
-       {/* MAPA MUNDIAL DE CLUSTERS & LISTA DE CONCELHOS */}
-       {abaAtiva === 'mapa' && (
+        {/* MAPA MUNDIAL DE CLUSTERS & HIERARQUIA GEOGRÁFICA */}
+        {abaAtiva === 'mapa' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-bold text-lg mb-1 flex items-center gap-2">🗺️ Onde Bebe O Grupo?</h2>
@@ -2156,37 +2158,87 @@ const statsStreaks = perfis.map(p => {
                 <div id="mapa-calor-container" className="w-full h-full bg-slate-900"></div>
               </div>
 
-              {/* 🏙️ LISTA DE CONCELHOS REGISTADOS */}
+              {/* 🏙️ LISTA EXPANSÍVEL: PAÍSES -> DISTRITOS -> CONCELHOS */}
               <div className="pt-2 border-t border-slate-800/50">
                 <h3 className="font-black text-sm text-amber-500 uppercase tracking-wider mb-3 flex items-center justify-between">
-                  <span>📍 Concelhos Conquistados</span>
-                  <span className="text-xs text-slate-400 font-semibold">{cidadesStats.length} locais</span>
+                  <span>📍 Territórios Conquistados</span>
+                  <span className="text-xs text-slate-400 font-semibold">{geoStats.length} países</span>
                 </h3>
 
-                {cidadesStats.length === 0 ? (
+                {geoStats.length === 0 ? (
                   <p className="text-xs text-slate-500 italic text-center py-2">Nenhum fino registado com GPS ainda.</p>
                 ) : (
-                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    {cidadesStats.map((item, idx) => (
-                      <div key={idx} className={`p-3 rounded-xl border flex justify-between items-center text-xs ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                        <div>
-                          <p className="font-extrabold text-white text-sm">📍 {item.cidade}</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[180px]">
-                            Bebedores: {item.pessoas.join(', ')}
-                          </p>
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                    {geoStats.map((p) => {
+                      const paisAberto = !!paisesAbertos[p.pais];
+                      return (
+                        <div key={p.pais} className={`border rounded-2xl overflow-hidden transition-all ${darkMode ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-slate-50'}`}>
+                          {/* 1. PAÍS */}
+                          <button
+                            onClick={() => togglePais(p.pais)}
+                            className="w-full p-3.5 flex justify-between items-center text-left font-black text-sm bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition"
+                          >
+                            <span className="flex items-center gap-2">🌍 {p.pais}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs border border-amber-500/30">
+                                {formatarFinos(p.total)} finos
+                              </span>
+                              <span className="text-xs opacity-70">{paisAberto ? '▲' : '▼'}</span>
+                            </div>
+                          </button>
+
+                          {/* 2. DISTRITO */}
+                          {paisAberto && (
+                            <div className="p-2 space-y-2 bg-black/20">
+                              {p.distritos.map((d) => {
+                                const chaveDistrito = `${p.pais}_${d.distrito}`;
+                                const distritoAberto = !!distritosAbertos[chaveDistrito];
+                                return (
+                                  <div key={chaveDistrito} className="border border-slate-800/80 rounded-xl overflow-hidden bg-slate-900/60">
+                                    <button
+                                      onClick={() => toggleDistrito(chaveDistrito)}
+                                      className="w-full p-2.5 flex justify-between items-center text-left font-bold text-xs text-slate-200 hover:bg-slate-800/50 transition"
+                                    >
+                                      <span className="flex items-center gap-1.5">🏛️ {d.distrito}</span>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[10px] text-amber-400 font-extrabold">{formatarFinos(d.total)} finos</span>
+                                        <span className="text-[10px] opacity-60">{distritoAberto ? '▲' : '▼'}</span>
+                                      </div>
+                                    </button>
+
+                                    {/* 3. CONCELHO */}
+                                    {distritoAberto && (
+                                      <div className="p-2 space-y-1.5 border-t border-slate-800/50 bg-slate-950/90">
+                                        {d.concelhos.map((c, idx) => (
+                                          <div key={idx} className="p-2 rounded-lg bg-black/40 border border-slate-800 flex justify-between items-center text-xs">
+                                            <div>
+                                              <p className="font-extrabold text-white text-xs">📍 {c.concelho}</p>
+                                              <p className="text-[9px] text-slate-400 truncate max-w-[170px]">
+                                                Bebedores: {c.pessoas.join(', ')}
+                                              </p>
+                                            </div>
+                                            <span className="font-black px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 text-[10px] shrink-0 border border-amber-500/20">
+                                              {formatarFinos(c.total)} finos
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                        <span className="font-black px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs shrink-0">
-                          {formatarFinos(item.total)} finos
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
             </div>
           </div>
         )}
-
+        
         {/* GRANDES FEITOS */}
         {abaAtiva === 'feitos' && (
           <div className="space-y-6">
