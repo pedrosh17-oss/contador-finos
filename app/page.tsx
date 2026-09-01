@@ -75,7 +75,17 @@ const MARCOS_GRUPO = [
   { meta: 850, texto: "O peso total da cerveja é superior ao de duas motas scooter de 125cc juntas. RESPECT!" },
   { meta: 900, texto: "180 Litros OU CRL... O guito daria para pagar a renda de um T1 fora do centro durante 2 meses." },
   { meta: 950, texto: "O volume enchia o estômago de camelo adulto até ele não ter mais sede. QUE CAMPEÕES!" },
-  { meta: 1000, texto: "1.000 FINOS! 200 LITROS DE CERVEJA! O volume total enchia rigorosamente a bagageira de um Volkswagen Golf de 2020 até ao teto! Somos grandes!" }
+  { meta: 1000, texto: "1.000 FINOS! 200 LITROS DE CERVEJA! O volume total enchia rigorosamente a bagageira de um Volkswagen Golf de 2020 até ao teto! Somos grandes!" },
+  { meta: 1100, texto: "220 Litros no bucho. O peso em cerveja é superior ao de um leão adulto macho. Que equipa!" },
+  { meta: 1200, texto: "240 Litros de cerveja. O guito gasto daria para pagar um ano inteiro de propinas da faculdade a pronto pagamento. Mas também é mais fixe um gajo gabar-se destes números." },
+  { meta: 1300, texto: "O volume de cevada já enchia o depósito de água de um camião de bombeiros pequeno. Cá puta." },
+  { meta: 1400, texto: "Mais ou menos 2.100€ que já fodemos que na verdade são mais devido as pints. Dava para uma viagem ao Japão." },
+  { meta: 1500, texto: "300 Litros. O volume daria para encher a capacidade total do porta-bagagens de um Renault Clio de 2023." },
+  { meta: 1600, texto: "Quase 3 salários mínimos nacionais líquidos: O equivalente a mais de dois meses e meio de trabalho a tempo inteiro de um trabalhador em Portugal." },
+  { meta: 1700, texto: "O peso líquido em cerveja é superior ao de dois ursos-pandas gordinhos juntos." },
+  { meta: 1800, texto: "1080 idas à casa de banho: Assumindo a regra matemática de que 'tudo o que entra tem de sair', este volume traduz-se em cerca de 360 a 400 litros de urina expelidos." },
+  { meta: 1900, texto: "Atingimos a fasquia do volume exato da bagageira de um Volkswagen Golf cheia de cerveja pura até transbordar pelas portas!" },
+  { meta: 2000, texto: "2.000 FINOS! 400 LITROS DE CERVEJA E 3.000€ EM COPOS! Sugiro uma jantarada só com coca-cola e agua das pedras. Para cortar." }
 ];
 
 
@@ -754,21 +764,27 @@ export default function Home() {
     
     if (vitsSemana > 0) list.push(`👑 Campeão da Semana (x${vitsSemana})`);
     if (vitsMes > 0) list.push(`🏆 Campeão do Mês (x${vitsMes})`);
-
+  
     const rodadasPagas = finos.filter(f => f.pagador_id === userId).length;
     if (rodadasPagas > 0) {
       const rodadasUnicas = new Set(finos.filter(f => f.pagador_id === userId).map(f => f.data_hora)).size;
       list.push(`💸 Paga-Rodadas (${rodadasUnicas}x)`);
     }
-
-    const umaSemanaAtrasMs = Date.now() - 7 * 86400000;
-    const bebeuNaUltimaSemana = userFinosValidos.some(f => new Date(f.data_hora).getTime() >= umaSemanaAtrasMs);
-    if (!bebeuNaUltimaSemana && userFinosValidos.length > 0) list.push('🌵 Deserto');
-
+  
     if (!userFinosValidos || userFinosValidos.length === 0) return list;
+  
+    // 🐪 MEDALHA DE DIAS A SECO
+    const ultFinoMs = Math.max(...userFinosValidos.map(f => new Date(f.data_hora).getTime()));
+    const diasSemBeber = Math.floor((Date.now() - ultFinoMs) / 86400000);
+    if (diasSemBeber >= 5) {
+      list.push(`🐪 ${diasSemBeber} Dias a Seco`);
+    }
+  
+    // 🦉 HORÁRIOS
     if (userFinosValidos.some((f) => { const h = new Date(f.data_hora).getHours(); return h >= 6 && h < 13; })) list.push('🌅 Madrugador');
     if (userFinosValidos.some((f) => { const h = new Date(f.data_hora).getHours(); return h >= 3 && h < 6; })) list.push('🦉 Coruja');
     
+    // ⚡ RITMO
     const ord = [...userFinosValidos].sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
     for (let i = 0; i < ord.length; i++) {
       let soma = 0;
@@ -779,12 +795,32 @@ export default function Home() {
       }
       if (soma >= 3.0) { list.push('⚡ Acelerado'); break; }
     }
+  
+    // 🔥 MAIOR STREAK DE SEMPRE DO GRUPO (LONGEST STREAK EVER)
+    const userStreakObj = statsStreaks.find(s => s.id === userId);
+    const userMaxStreak = userStreakObj?.maxStreak || 0;
+    const recordeAbsolutoGrupo = Math.max(...statsStreaks.map(s => s.maxStreak), 0);
     
+    if (userMaxStreak > 0 && userMaxStreak === recordeAbsolutoGrupo) {
+      list.push(`🔥 Longest Streak Ever (${userMaxStreak}d)`);
+    }
+    
+    // 🍺 VOLUMES INDIVIDUAIS
     const totalEq = userFinosValidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
     if (totalEq >= 1) list.push('🌱 Primeira Bebida');
-    if (totalEq >= 10) list.push('🥉 Equivalente a 10 Finos');
-    if (totalEq >= 25) list.push('🥈 Equivalente a 25 Finos');
-    if (totalEq >= 50) list.push('🥇 Equivalente a 50 Finos');
+    if (totalEq >= 10) list.push('🥉 10 Finos');
+    if (totalEq >= 25) list.push('🥈 25 Finos');
+    if (totalEq >= 50) list.push('🥇 50 Finos');
+    if (totalEq >= 100) list.push('💯 100 Finos');
+    if (totalEq >= 150) list.push('💥 150 Finos');
+    if (totalEq >= 200) list.push('💣 200 Finos');
+    if (totalEq >= 250) list.push('🚀 250 Finos');
+    if (totalEq >= 300) list.push('⚡ 300 Finos');
+    if (totalEq >= 350) list.push('🌋 350 Finos');
+    if (totalEq >= 400) list.push('👑 400 Finos');
+    if (totalEq >= 450) list.push('☣️ 450 Finos');
+    if (totalEq >= 500) list.push('🪐 500 Finos (Lenda)');
+  
     return list;
   }
 
@@ -796,7 +832,29 @@ export default function Home() {
     .sort((a, b) => b.countGeral - a.countGeral);
 
   const reiDoFinoAbsoluto = rankingAbsoluto[0];
+  
+// 👇 COLA EXATAMENTE AQUI O CÓDIGO ABAIXO 👇
+const statsStreaks = perfis.map(p => {
+  const pFinos = finosValidos.filter(f => f.perfil_id === p.id);
+  const diasUnicosMs = Array.from(new Set(pFinos.map(f => new Date(f.data_hora).setHours(0, 0, 0, 0)))).sort((a, b) => a - b);
+  let maxS = 0, curS = 0, tempS = 0, lastMs: number | null = null;
+  
+  diasUnicosMs.forEach(diaMs => {
+    if (lastMs === null) { tempS = 1; } else {
+      const diffDays = Math.round((diaMs - lastMs) / 86400000);
+      if (diffDays === 1) tempS++; else if (diffDays > 1) tempS = 1;
+    }
+    if (tempS > maxS) maxS = tempS;
+    lastMs = diaMs;
+  });
 
+  if (diasUnicosMs.length > 0) {
+    const lastDayMs = diasUnicosMs[diasUnicosMs.length - 1];
+    if (lastDayMs === hojeMs || lastDayMs === ontemMs) curS = tempS; 
+    else curS = 0;
+  }
+  return { id: p.id, nome: p.nome, maxStreak: maxS, currentStreak: curS };
+});
   const contagemPorPessoa = perfis
     .map((p) => {
       const userFinosGeral = finos.filter((f) => f.perfil_id === p.id);
@@ -824,27 +882,6 @@ export default function Home() {
     })
     .sort((a, b) => b.count - a.count);
 
-  const statsStreaks = perfis.map(p => {
-    const pFinos = finosValidos.filter(f => f.perfil_id === p.id);
-    const diasUnicosMs = Array.from(new Set(pFinos.map(f => new Date(f.data_hora).setHours(0, 0, 0, 0)))).sort((a, b) => a - b);
-    let maxS = 0, curS = 0, tempS = 0, lastMs: number | null = null;
-    
-    diasUnicosMs.forEach(diaMs => {
-      if (lastMs === null) { tempS = 1; } else {
-        const diffDays = Math.round((diaMs - lastMs) / 86400000);
-        if (diffDays === 1) tempS++; else if (diffDays > 1) tempS = 1;
-      }
-      if (tempS > maxS) maxS = tempS;
-      lastMs = diaMs;
-    });
-
-    if (diasUnicosMs.length > 0) {
-      const lastDayMs = diasUnicosMs[diasUnicosMs.length - 1];
-      if (lastDayMs === hojeMs || lastDayMs === ontemMs) curS = tempS; 
-      else curS = 0;
-    }
-    return { id: p.id, nome: p.nome, maxStreak: maxS, currentStreak: curS };
-  });
 
   const horasCount = { 'Madrugada': 0, 'Manhã': 0, 'Tarde': 0, 'Noite': 0 };
   const diasSemanaCount = [0, 0, 0, 0, 0, 0, 0];
