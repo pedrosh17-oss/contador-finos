@@ -148,7 +148,7 @@ async function ativarNotificacoesPush(perfilId: string) {
   return true;
 }
 
-async function comprimirImagem(file: File, maxDimensao = 600, qualidade = 0.8): Promise<File> {
+async function comprimirImagem(file: File, maxDimensao = 400, qualidade = 0.6): Promise<File> {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
