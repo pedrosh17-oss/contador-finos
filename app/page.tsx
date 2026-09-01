@@ -2063,37 +2063,6 @@ const statsStreaks = perfis.map(p => {
                 </div>
               )}
 
-              {/* OPÇÃO 5: TRIVIA CONFIG 🧠 */}
-              {modoDecisaoRodada === 'trivia' && (
-                <div className="mt-4 pt-4 border-t border-slate-800/50 text-center space-y-4">
-                  {presentesMesa.length >= 2 ? (
-                    <>
-                      {/* CONFIGURAÇÃO DO TEMA ANTES DE COMEÇAR */}
-                      {triviaPerguntas.length === 0 && !triviaCarregandoIA && (
-                        <div className="space-y-3 p-3 rounded-2xl bg-black/40 border border-slate-800 text-left">
-                          <label className="block text-[10px] font-black uppercase text-amber-500">🎯 Escolhe ou escreve o tema do duelo com imagens:</label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {TEMAS_RAPIDOS_TRIVIA.map(t => (
-                              <button key={t} onClick={() => setTriviaTemaInput(t)} className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold border transition ${triviaTemaInput === t ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-amber-500/50'}`}>{t}</button>
-                            ))}
-                          </div>
-                          <input type="text" placeholder="Ex: Estádios de Futebol, Marcas de Cerveja..." className="w-full p-2.5 rounded-xl border border-slate-700 bg-slate-900 text-white font-bold text-xs outline-none focus:border-amber-500" value={triviaTemaInput} onChange={(e) => setTriviaTemaInput(e.target.value)} />
-                          <button onClick={iniciarJogoTriviaIA} className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg transition active:scale-95">🧠 Gerar 10 Perguntas com Fotos para Todos</button>
-                        </div>
-                      )}
-                      
-                      {triviaCarregandoIA && (
-                        <div className="p-8 rounded-2xl bg-black/50 border border-amber-500/30 space-y-3"><div className="text-4xl animate-spin">🧠</div><p className="text-xs font-black text-amber-400 uppercase tracking-widest">O Gemini está a escolher as fotos e a criar perguntas...</p></div>
-                      )}
-                      
-                      {triviaPerguntas.length > 0 && !triviaCarregandoIA && (
-                         <button onClick={fecharJanelaTrivia} className="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs shadow-lg transition active:scale-95 mt-4">🔄 Limpar Mesa / Jogar Outro Duelo</button>
-                      )}
-                    </>
-                  ) : (<p className="text-xs text-slate-500 py-2">Seleciona pelo menos 2 pessoas na mesa para jogar!</p>)}
-                </div>
-              )}
-
             </div>
           </div>
         )}
