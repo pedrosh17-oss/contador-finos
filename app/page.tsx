@@ -271,7 +271,32 @@ function calcularCampeoesHistoricos(finosList: any[]) {
 
   return { vitoriasSemana, vitoriasMes };
 }
+// 🌐 DICIONÁRIO DE BANDEIRAS DOS PAÍSES
+const BANDEIRAS_PAISES: Record<string, string> = {
+  'Portugal': '🇵🇹',
+  'Espanha': '🇪🇸',
+  'Spain': '🇪🇸',
+  'Reino Unido': '🇬🇧',
+  'United Kingdom': '🇬🇧',
+  'França': '🇫🇷',
+  'France': '🇫🇷',
+  'Alemanha': '🇩🇪',
+  'Germany': '🇩🇪',
+  'Itália': '🇮🇹',
+  'Italy': '🇮🇹',
+  'Estados Unidos': '🇺🇸',
+  'United States': '🇺🇸',
+  'Brasil': '🇧🇷',
+  'Brazil': '🇧🇷',
+  'Países Baixos': '🇳🇱',
+  'Netherlands': '🇳🇱',
+  'Irlanda': '🇮🇪',
+  'Ireland': '🇮🇪',
+  'Suíça': '🇨🇭',
+  'Switzerland': '🇨🇭',
+};
 
+const obterBandeira = (pais: string) => BANDEIRAS_PAISES[pais] || '🌍';
 export default function Home() {
   const [abaAtiva, setAbaAtiva] = useState<'inicio' | 'ranking' | 'perfil' | 'rodada' | 'mapa' | 'feitos' | 'historico'>('inicio');
   const [toast, setToast] = useState<{msg: string, tipo: 'erro' | 'sucesso'} | null>(null);
@@ -861,6 +886,8 @@ export default function Home() {
 
   const historicoCampeoes = calcularCampeoesHistoricos(finos);
 
+  
+
   function calcularConquistas(userFinosValidos: any[], userId: string) {
     const list: string[] = [];
     const vitsSemana = historicoCampeoes.vitoriasSemana[userId] || 0;
@@ -868,26 +895,26 @@ export default function Home() {
     
     if (vitsSemana > 0) list.push(`👑 Campeão da Semana (x${vitsSemana})`);
     if (vitsMes > 0) list.push(`🏆 Campeão do Mês (x${vitsMes})`);
-  
+
     const rodadasPagas = finos.filter(f => f.pagador_id === userId).length;
     if (rodadasPagas > 0) {
       const rodadasUnicas = new Set(finos.filter(f => f.pagador_id === userId).map(f => f.data_hora)).size;
       list.push(`💸 Paga-Rodadas (${rodadasUnicas}x)`);
     }
-  
+
     if (!userFinosValidos || userFinosValidos.length === 0) return list;
-  
+
     // 🐪 MEDALHA DE DIAS A SECO
     const ultFinoMs = Math.max(...userFinosValidos.map(f => new Date(f.data_hora).getTime()));
     const diasSemBeber = Math.floor((Date.now() - ultFinoMs) / 86400000);
     if (diasSemBeber >= 5) {
       list.push(`🐪 ${diasSemBeber} Dias a Seco`);
     }
-  
+
     // 🦉 HORÁRIOS
     if (userFinosValidos.some((f) => { const h = new Date(f.data_hora).getHours(); return h >= 6 && h < 13; })) list.push('🌅 Madrugador');
     if (userFinosValidos.some((f) => { const h = new Date(f.data_hora).getHours(); return h >= 3 && h < 6; })) list.push('🦉 Coruja');
-    
+
     // ⚡ RITMO
     const ord = [...userFinosValidos].sort((a, b) => new Date(a.data_hora).getTime() - new Date(b.data_hora).getTime());
     for (let i = 0; i < ord.length; i++) {
@@ -899,16 +926,16 @@ export default function Home() {
       }
       if (soma >= 3.0) { list.push('⚡ Acelerado'); break; }
     }
-  
-    // 🔥 MAIOR STREAK DE SEMPRE DO GRUPO (LONGEST STREAK EVER)
+
+    // 🔥 MAIOR STREAK DE SEMPRE DO GRUPO
     const userStreakObj = statsStreaks.find(s => s.id === userId);
     const userMaxStreak = userStreakObj?.maxStreak || 0;
     const recordeAbsolutoGrupo = Math.max(...statsStreaks.map(s => s.maxStreak), 0);
-    
+
     if (userMaxStreak > 0 && userMaxStreak === recordeAbsolutoGrupo) {
       list.push(`🔥 Longest Streak Ever (${userMaxStreak}d)`);
     }
-    
+
     // 🍺 VOLUMES INDIVIDUAIS
     const totalEq = userFinosValidos.reduce((acc, f) => acc + (f.quantidade_equivalente ?? 1), 0);
     if (totalEq >= 1) list.push('🌱 Primeira Bebida');
@@ -925,17 +952,36 @@ export default function Home() {
     if (totalEq >= 450) list.push('☣️ 450 Finos');
     if (totalEq >= 500) list.push('🪐 500 Finos (Lenda)');
 
-    // 🌍 MEDALHAS DE EXPLORAÇÃO DE CONCELHOS
-  const zonasUnicas = new Set(
-    userFinosValidos
-      .filter(f => f.lat && f.lng)
-      .map(f => `${f.lat.toFixed(2)},${f.lng.toFixed(2)}`)
-  ).size;
+    // 🌍 MEDALHAS DE EXPLORAÇÃO DE CONCELHOS E PAÍSES
+    const zonasUnicas = new Set(
+      userFinosValidos
+        .filter(f => f.lat && f.lng)
+        .map(f => `${f.lat.toFixed(2)},${f.lng.toFixed(2)}`)
+    ).size;
 
-  if (zonasUnicas >= 2) list.push('🚗 Turista de Tascos (2+ concelhos)');
-  if (zonasUnicas >= 5) list.push('✈️ Trotamundos (5+ concelhos)');
-  if (zonasUnicas >= 10) list.push('🗺️ Colombo dos Finos (10+ concelhos)');
-  
+    if (zonasUnicas >= 2) list.push('🚗 Turista de Tascos (2+ concelhos)');
+    if (zonasUnicas >= 5) list.push('✈️ Trotamundos (5+ concelhos)');
+    if (zonasUnicas >= 10) list.push('🗺️ Colombo dos Finos (10+ concelhos)');
+
+    const paisesUnicos = new Set(
+      userFinosValidos
+        .filter(f => f.lat && f.lng)
+        .map(f => {
+          if (typeof window === 'undefined') return null;
+          const key = `geo_hierarquia_v3_${Number(f.lat).toFixed(2)},${Number(f.lng).toFixed(2)}`;
+          const cached = localStorage.getItem(key);
+          if (cached) {
+            try { return JSON.parse(cached).country; } catch {}
+          }
+          return null;
+        })
+        .filter(Boolean)
+    ).size;
+
+    if (paisesUnicos >= 2) list.push('🌍 Embaixador do Fino (2+ países)');
+    if (paisesUnicos >= 3) list.push('✈️ Cervejeiro Sem Fronteiras (3+ países)');
+    if (paisesUnicos >= 5) list.push('🚀 Cidadão do Mundo (5+ países)');
+
     return list;
   }
 
@@ -2174,12 +2220,13 @@ const statsStreaks = perfis.map(p => {
                       return (
                         <div key={p.pais} className={`border rounded-2xl overflow-hidden transition-all ${darkMode ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-slate-50'}`}>
                           {/* 1. PAÍS */}
-                          <button
-                            onClick={() => togglePais(p.pais)}
-                            className="w-full p-3.5 flex justify-between items-center text-left font-black text-sm bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition"
-                          >
-                            <span className="flex items-center gap-2">🌍 {p.pais}</span>
-                            <div className="flex items-center gap-2">
+                          {/* ✅ CÓDIGO CORRIGIDO */}
+<button
+  onClick={() => togglePais(p.pais)}
+  className="w-full p-3.5 flex justify-between items-center text-left font-black text-sm bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition"
+>
+  <span className="flex items-center gap-2">{obterBandeira(p.pais)} {p.pais}</span>
+  <div className="flex items-center gap-2">
                               <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs border border-amber-500/30">
                                 {formatarFinos(p.total)} finos
                               </span>
