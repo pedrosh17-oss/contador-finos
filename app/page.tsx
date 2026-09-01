@@ -470,7 +470,9 @@ export default function Home() {
 
  
 
-  // 🗺️ MAPA DE CLUSTERS LEAFLET
+  // 🗺️ MAPA DE CLUSTERS E LISTA DE CONCELHOS
+  const [cidadesStats, setCidadesStats] = useState<{ cidade: string; total: number; pessoas: string[] }[]>([]);
+
   useEffect(() => {
     if (abaAtiva !== 'mapa' || typeof window === 'undefined') return;
 
@@ -484,9 +486,9 @@ export default function Home() {
         const map = L.map('mapa-calor-container').setView([41.1579, -8.6291], 6);
         mapRef.current = map;
 
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          attribution: '&copy; OpenStreetMap',
-          subdomains: 'abcd',
+        // 🛠️ TILE LAYER LIMPO (SEM MARCA D'ÁGUA)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors',
           maxZoom: 19
         }).addTo(map);
 
@@ -540,15 +542,79 @@ export default function Home() {
 
     if (!inicializarMapa()) {
       intervalId = setInterval(() => {
-        if (inicializarMapa()) {
-          clearInterval(intervalId);
-        }
+        if (inicializarMapa()) clearInterval(intervalId);
       }, 150);
     }
 
-    return () => {
-      if (intervalId) clearInterval(intervalId);
+    // 🏙️ CÁLCULO DOS CONCELHOS (VERSÃO LIMPA V6 SEM ERROS DE FETCH)
+    const processarCidades = async () => {
+      try {
+        const pontos = finos.filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio');
+        if (!pontos || pontos.length === 0) {
+          setCidadesStats([]);
+          return;
+        }
+
+        // 1. Agrupar por coordenadas aproximadas (~2km)
+        const pontosPorCoordenada: Record<string, { lat: number; lng: number; total: number; pessoas: Set<string> }> = {};
+
+        pontos.forEach(p => {
+          if (p.lat == null || p.lng == null) return;
+          const key = `${Number(p.lat).toFixed(2)},${Number(p.lng).toFixed(2)}`;
+          if (!pontosPorCoordenada[key]) {
+            pontosPorCoordenada[key] = { lat: p.lat, lng: p.lng, total: 0, pessoas: new Set() };
+          }
+          pontosPorCoordenada[key].total += (p.quantidade_equivalente ?? 1);
+          if (p.perfis?.nome) pontosPorCoordenada[key].pessoas.add(p.perfis.nome);
+        });
+
+        // 2. Chamar a API local com tratamento direto de erros
+        const mapaAgrupadoConcelhos: Record<string, { total: number; pessoas: Set<string> }> = {};
+
+        for (const [key, dados] of Object.entries(pontosPorCoordenada)) {
+          const cacheKey = `geo_concelho_v6_${key}`;
+          let nomeConcelho = localStorage.getItem(cacheKey);
+
+          if (!nomeConcelho) {
+            try {
+              const res = await fetch(`/api/geocode?lat=${dados.lat}&lng=${dados.lng}`);
+              if (res.ok) {
+                const data = await res.json();
+                if (data?.city) {
+                  nomeConcelho = data.city;
+                  localStorage.setItem(cacheKey, nomeConcelho);
+                }
+              }
+            } catch {
+              // Se a rota falhar no browser, define o nome local diretamente
+            }
+          }
+
+          const concelhoFinal = nomeConcelho || `Zona (${key})`;
+
+          if (!mapaAgrupadoConcelhos[concelhoFinal]) {
+            mapaAgrupadoConcelhos[concelhoFinal] = { total: 0, pessoas: new Set() };
+          }
+
+          mapaAgrupadoConcelhos[concelhoFinal].total += dados.total;
+          dados.pessoas.forEach(p => mapaAgrupadoConcelhos[concelhoFinal].pessoas.add(p));
+        }
+
+        const resultadoFinal = Object.entries(mapaAgrupadoConcelhos).map(([cidade, dados]) => ({
+          cidade,
+          total: dados.total,
+          pessoas: Array.from(dados.pessoas)
+        })).sort((a, b) => b.total - a.total);
+
+        setCidadesStats(resultadoFinal);
+      } catch (err) {
+        console.error('Erro silencioso em processarCidades:', err);
+      }
     };
+
+    processarCidades();
+
+    return () => { if (intervalId) clearInterval(intervalId); };
   }, [abaAtiva, finos]);
 
   const handleAtivarNotificacoes = async () => {
@@ -832,6 +898,17 @@ export default function Home() {
     if (totalEq >= 400) list.push('👑 400 Finos');
     if (totalEq >= 450) list.push('☣️ 450 Finos');
     if (totalEq >= 500) list.push('🪐 500 Finos (Lenda)');
+
+    // 🌍 MEDALHAS DE EXPLORAÇÃO DE CONCELHOS
+  const zonasUnicas = new Set(
+    userFinosValidos
+      .filter(f => f.lat && f.lng)
+      .map(f => `${f.lat.toFixed(2)},${f.lng.toFixed(2)}`)
+  ).size;
+
+  if (zonasUnicas >= 2) list.push('🚗 Turista de Tascos (2+ concelhos)');
+  if (zonasUnicas >= 5) list.push('✈️ Trotamundos (5+ concelhos)');
+  if (zonasUnicas >= 10) list.push('🗺️ Colombo dos Finos (10+ concelhos)');
   
     return list;
   }
@@ -2068,13 +2145,43 @@ const statsStreaks = perfis.map(p => {
         )}
 
         {/* MAPA MUNDIAL DE CLUSTERS */}
-        {abaAtiva === 'mapa' && (
+       {/* MAPA MUNDIAL DE CLUSTERS & LISTA DE CONCELHOS */}
+       {abaAtiva === 'mapa' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-bold text-lg mb-1 flex items-center gap-2">🗺️ Onde Bebe O Grupo?</h2>
               <p className="text-xs text-slate-400 mb-4">Mapeamento em tempo real com GPS. Foca o mapa para veres em que tascos as bebidas se dividem!</p>
-              <div className="w-full h-96 rounded-2xl overflow-hidden border border-slate-700/50 shadow-inner relative z-10">
+              
+              <div className="w-full h-80 rounded-2xl overflow-hidden border border-slate-700/50 shadow-inner relative z-10 mb-6">
                 <div id="mapa-calor-container" className="w-full h-full bg-slate-900"></div>
+              </div>
+
+              {/* 🏙️ LISTA DE CONCELHOS REGISTADOS */}
+              <div className="pt-2 border-t border-slate-800/50">
+                <h3 className="font-black text-sm text-amber-500 uppercase tracking-wider mb-3 flex items-center justify-between">
+                  <span>📍 Concelhos Conquistados</span>
+                  <span className="text-xs text-slate-400 font-semibold">{cidadesStats.length} locais</span>
+                </h3>
+
+                {cidadesStats.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic text-center py-2">Nenhum fino registado com GPS ainda.</p>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {cidadesStats.map((item, idx) => (
+                      <div key={idx} className={`p-3 rounded-xl border flex justify-between items-center text-xs ${darkMode ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                        <div>
+                          <p className="font-extrabold text-white text-sm">📍 {item.cidade}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[180px]">
+                            Bebedores: {item.pessoas.join(', ')}
+                          </p>
+                        </div>
+                        <span className="font-black px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs shrink-0">
+                          {formatarFinos(item.total)} finos
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
