@@ -546,7 +546,7 @@ export default function Home() {
       }, 150);
     }
 
-    // 🏙️ CÁLCULO DOS CONCELHOS (VERSÃO LIMPA V6 SEM ERROS DE FETCH)
+    // 🏙️ CÁLCULO DOS CONCELHOS (VERSÃO ULTRA-ESTÁVEL SEM ERROS TYPESCRIPT)
     const processarCidades = async () => {
       try {
         const pontos = finos.filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio');
@@ -611,7 +611,7 @@ export default function Home() {
         console.error('Erro silencioso em processarCidades:', err);
       }
     };
-
+    
     processarCidades();
 
     return () => { if (intervalId) clearInterval(intervalId); };
