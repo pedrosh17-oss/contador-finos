@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 // ⚙️ CONFIGURAÇÃO RÁPIDA
 // ==========================================
 const TOTAL_GIFS = 1;                     
-const META_FESTA_DIARIA = 20;             
+const META_FESTA_DIARIA = 40;             
 const DATA_INICIO_PROJETO = '2026-08-05';   
 
 // 🏷️ TÍTULOS OFICIAIS DO RANKING
