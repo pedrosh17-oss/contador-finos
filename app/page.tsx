@@ -2345,8 +2345,8 @@ const statsStreaks = perfis.map(p => {
           </div>
         )}
 
-        {/* GALERIA */}
-        {abaAtiva === 'historico' && (
+       {/* GALERIA */}
+       {abaAtiva === 'historico' && (
           <div className="space-y-6">
             <div className={`p-4 rounded-2xl shadow border transition-colors ${cardClasses}`}>
               <h2 className="font-bold text-lg mb-3 border-b pb-2 border-slate-800/50">📅 Fotos e Histórico</h2>
@@ -2380,7 +2380,18 @@ const statsStreaks = perfis.map(p => {
                                     </span>
                                     <span className="text-slate-500">{new Date(f.data_hora).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                   </div>
-                                  {f.foto_url && <img src={f.foto_url} alt="Bebida" loading="lazy" onClick={() => setFotoExpandida(f.foto_url)} className="w-full h-40 object-cover rounded-xl shadow-sm mt-1 cursor-pointer hover:opacity-90 transition" />}
+                                  
+                                  {/* ⚡ LAZY LOADING APLICADO AQUI ⚡ */}
+                                  {f.foto_url && (
+                                    <img 
+                                      src={f.foto_url} 
+                                      alt="Bebida" 
+                                      loading="lazy" 
+                                      decoding="async" 
+                                      onClick={() => setFotoExpandida(f.foto_url)} 
+                                      className="w-full h-40 object-cover rounded-xl shadow-sm mt-1 cursor-pointer hover:opacity-90 transition bg-slate-800/20" 
+                                    />
+                                  )}
                                 </div>
                               );
                             })}
