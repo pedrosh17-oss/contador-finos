@@ -322,17 +322,28 @@ export default function Home() {
   const [fotoExpandida, setFotoExpandida] = useState<string | null>(null);
   const [diasAbertos, setDiasAbertos] = useState<{ [key: string]: boolean }>({});
 
-  // 🌍 ESTADOS DA HIERARQUIA GEOGRÁFICA (PAÍS -> DISTRITO -> CONCELHO)
-  type ConcelhoItem = { concelho: string; total: number; pessoas: string[] };
-  type DistritoItem = { distrito: string; total: number; concelhos: ConcelhoItem[] };
-  type PaisItem = { pais: string; total: number; distritos: DistritoItem[] };
+// 🌍 ESTADOS DA HIERARQUIA GEOGRÁFICA
+type ConcelhoItem = { concelho: string; total: number; pessoas: string[]; lat?: number; lng?: number };
+type DistritoItem = { distrito: string; total: number; concelhos: ConcelhoItem[] };
+type PaisItem = { pais: string; total: number; distritos: DistritoItem[] };
 
-  const [geoStats, setGeoStats] = useState<PaisItem[]>([]);
-  const [paisesAbertos, setPaisesAbertos] = useState<Record<string, boolean>>({});
-  const [distritosAbertos, setDistritosAbertos] = useState<Record<string, boolean>>({});
+const [geoStats, setGeoStats] = useState<PaisItem[]>([]);
+const [paisesAbertos, setPaisesAbertos] = useState<Record<string, boolean>>({});
+const [distritosAbertos, setDistritosAbertos] = useState<Record<string, boolean>>({});
 
-  const togglePais = (pais: string) => setPaisesAbertos(prev => ({ ...prev, [pais]: !prev[pais] }));
-  const toggleDistrito = (distrito: string) => setDistritosAbertos(prev => ({ ...prev, [distrito]: !prev[distrito] }));
+const togglePais = (pais: string) => setPaisesAbertos(prev => ({ ...prev, [pais]: !prev[pais] }));
+const toggleDistrito = (distrito: string) => setDistritosAbertos(prev => ({ ...prev, [distrito]: !prev[distrito] }));
+
+// 🎯 CENTRAR O MAPA NO CONCELHO CLICADO
+const focarNoMapa = (lat?: number, lng?: number) => {
+  if (lat != null && lng != null && mapRef.current) {
+    mapRef.current.flyTo([lat, lng], 14, { duration: 1.2 });
+    const container = document.getElementById('mapa-calor-container');
+    if (container) {
+      container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+};
 
   // 🎲 ABA RODADA & MINI-JOGOS
   const [modoDecisaoRodada, setModoDecisaoRodada] = useState<'roleta' | 'cronometro' | 'copo' | 'reacao'>('roleta');
@@ -580,7 +591,7 @@ export default function Home() {
       }, 150);
     }
 
-    // 🏙️ CÁLCULO HIERÁRQUICO: PAÍS -> DISTRITO -> CONCELHO
+    // 🏙️ CÁLCULO HIERÁRQUICO COM COORDENADAS PARA ZOOM
     const processarCidades = async () => {
       try {
         const pontos = finos.filter(f => f.lat && f.lng && f.tipo_bebida !== 'gregorio');
@@ -601,7 +612,7 @@ export default function Home() {
           if (p.perfis?.nome) pontosPorCoordenada[key].pessoas.add(p.perfis.nome);
         });
 
-        const mapaGeo: Record<string, Record<string, Record<string, { total: number; pessoas: Set<string> }>>> = {};
+        const mapaGeo: Record<string, Record<string, Record<string, { total: number; pessoas: Set<string>; lat: number; lng: number }>>> = {};
 
         for (const [key, dados] of Object.entries(pontosPorCoordenada)) {
           const cacheKey = `geo_hierarquia_v3_${key}`;
@@ -635,7 +646,9 @@ export default function Home() {
 
           if (!mapaGeo[pais]) mapaGeo[pais] = {};
           if (!mapaGeo[pais][distrito]) mapaGeo[pais][distrito] = {};
-          if (!mapaGeo[pais][distrito][concelho]) mapaGeo[pais][distrito][concelho] = { total: 0, pessoas: new Set() };
+          if (!mapaGeo[pais][distrito][concelho]) {
+            mapaGeo[pais][distrito][concelho] = { total: 0, pessoas: new Set(), lat: dados.lat, lng: dados.lng };
+          }
 
           mapaGeo[pais][distrito][concelho].total += dados.total;
           dados.pessoas.forEach(p => mapaGeo[pais][distrito][concelho].pessoas.add(p));
@@ -647,7 +660,7 @@ export default function Home() {
             let totalDistrito = 0;
             const concelhosArr: ConcelhoItem[] = Object.entries(concelhosObj).map(([concelho, d]) => {
               totalDistrito += d.total;
-              return { concelho, total: d.total, pessoas: Array.from(d.pessoas) };
+              return { concelho, total: d.total, pessoas: Array.from(d.pessoas), lat: d.lat, lng: d.lng };
             }).sort((a, b) => b.total - a.total);
 
             totalPais += totalDistrito;
@@ -2220,13 +2233,12 @@ const statsStreaks = perfis.map(p => {
                       return (
                         <div key={p.pais} className={`border rounded-2xl overflow-hidden transition-all ${darkMode ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-slate-50'}`}>
                           {/* 1. PAÍS */}
-                          {/* ✅ CÓDIGO CORRIGIDO */}
-<button
-  onClick={() => togglePais(p.pais)}
-  className="w-full p-3.5 flex justify-between items-center text-left font-black text-sm bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition"
->
-  <span className="flex items-center gap-2">{obterBandeira(p.pais)} {p.pais}</span>
-  <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => togglePais(p.pais)}
+                            className="w-full p-3.5 flex justify-between items-center text-left font-black text-sm bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition"
+                          >
+                            <span className="flex items-center gap-2">{obterBandeira(p.pais)} {p.pais}</span>
+                            <div className="flex items-center gap-2">
                               <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs border border-amber-500/30">
                                 {formatarFinos(p.total)} finos
                               </span>
@@ -2253,13 +2265,19 @@ const statsStreaks = perfis.map(p => {
                                       </div>
                                     </button>
 
-                                    {/* 3. CONCELHO */}
+                                    {/* 3. CONCELHO (CLICÁVEL PARA IR AO MAPA) */}
                                     {distritoAberto && (
                                       <div className="p-2 space-y-1.5 border-t border-slate-800/50 bg-slate-950/90">
                                         {d.concelhos.map((c, idx) => (
-                                          <div key={idx} className="p-2 rounded-lg bg-black/40 border border-slate-800 flex justify-between items-center text-xs">
+                                          <div 
+                                            key={idx} 
+                                            onClick={() => focarNoMapa(c.lat, c.lng)}
+                                            className="p-2 rounded-lg bg-black/40 border border-slate-800 hover:border-amber-500/50 flex justify-between items-center text-xs cursor-pointer transition active:scale-95 group"
+                                          >
                                             <div>
-                                              <p className="font-extrabold text-white text-xs">📍 {c.concelho}</p>
+                                              <p className="font-extrabold text-white text-xs group-hover:text-amber-400 transition flex items-center gap-1">
+                                                📍 {c.concelho} <span className="text-[9px] text-slate-500 font-normal">🔍 ver no mapa</span>
+                                              </p>
                                               <p className="text-[9px] text-slate-400 truncate max-w-[170px]">
                                                 Bebedores: {c.pessoas.join(', ')}
                                               </p>
